@@ -39,6 +39,12 @@ export function TemplateModal({ template, onClose, onCopyJson, onImport }: Templ
               <p>{template.credentials?.join(', ') ?? '없음'}</p>
             </div>
           </div>
+          {template.diagramImage && (
+            <div className="diagram">
+              <img src={template.diagramImage} alt={`${template.name} n8n 구성도`} />
+              {template.diagramCaption && <p className="muted small center">{template.diagramCaption}</p>}
+            </div>
+          )}
           <div className="code-block" aria-label="JSON preview">
             <pre>{JSON.stringify({ nodes: template.nodes, connections: template.connections }, null, 2)}</pre>
           </div>

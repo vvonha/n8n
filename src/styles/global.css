@@ -136,6 +136,12 @@ body {
   margin-top: 8px;
 }
 
+.auth-modes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .chip {
   background: rgba(255, 255, 255, 0.04);
   color: #e5e7eb;

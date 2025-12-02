@@ -5,6 +5,7 @@ import { templates, WorkflowTemplate } from './data/templates';
 import { importWorkflow } from './utils/n8nClient';
 
 const FALLBACK_HOST = 'https://your-n8n-domain.com';
+type AuthMode = 'pat' | 'basic' | 'cookie';
 
 function copyToClipboard(content: string) {
   if (!navigator.clipboard) {
@@ -24,7 +25,10 @@ function App() {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<WorkflowTemplate | null>(null);
   const [host, setHost] = useState(FALLBACK_HOST);
+  const [authMode, setAuthMode] = useState<AuthMode>('pat');
   const [token, setToken] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [status, setStatus] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -45,8 +49,8 @@ function App() {
   }, [query, selectedTag]);
 
   const handleImport = async (template: WorkflowTemplate) => {
-    if (!host || !token) {
-      setStatus('호스트 URL과 Personal Access Token을 입력해주세요.');
+    if (!host) {
+      setStatus('호스트 URL을 입력해주세요.');
       return;
     }
 
@@ -56,7 +60,10 @@ function App() {
       const workflowName = formatWorkflowName(template);
       const workflowId = await importWorkflow({
         host,
+        authMode,
         token,
+        username,
+        password,
         template,
         workflowName,
       });
@@ -87,14 +94,15 @@ function App() {
       <div className="gradient" aria-hidden="true" />
       <header className="hero">
         <div>
-          <p className="eyebrow">Lotte AI n8n Template Gallery</p>
+          <p className="eyebrow">n8n Template Gallery · 테스트용</p>
           <h1>
-            n8n 템플릿을 <span className="accent">모두</span> 모아보고
+            오너 템플릿을 <span className="accent">모두</span> 모아보고
             <br />
             원클릭으로 내 워크플로우에 추가하세요
           </h1>
           <p className="muted">
-            검색 · 태그 필터 · JSON 복사 · 내 n8n으로 바로 가져오기까지.
+            검색 · 태그 필터 · JSON 복사 · 내 n8n으로 바로 가져오기까지. 최신 UI 트렌드를 반영한 깔끔한
+            대시보드로 템플릿을 살펴보세요.
           </p>
           <div className="input-row">
             <input
@@ -131,18 +139,84 @@ function App() {
             value={host}
             onChange={(e) => setHost(e.target.value)}
           />
-          <label className="label" htmlFor="token">
-            Personal Access Token (PAT)
-          </label>
-          <input
-            id="token"
-            type="password"
-            placeholder="발급받은 PAT"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-          />
-          <p className="muted small">브라우저에서 직접 호출합니다. 토큰은 저장되지 않습니다.</p>
-          <button className="primary wide" disabled={!host || !token || isLoading} onClick={heroQuickImport}>
+          <div className="auth-modes" role="group" aria-label="인증 방식">
+            <button
+              className={authMode === 'pat' ? 'chip active' : 'chip'}
+              onClick={() => setAuthMode('pat')}
+            >
+              PAT
+            </button>
+            <button
+              className={authMode === 'basic' ? 'chip active' : 'chip'}
+              onClick={() => setAuthMode('basic')}
+            >
+              Basic Auth
+            </button>
+            <button
+              className={authMode === 'cookie' ? 'chip active' : 'chip'}
+              onClick={() => setAuthMode('cookie')}
+            >
+              세션 쿠키
+            </button>
+          </div>
+
+          {authMode === 'pat' && (
+            <>
+              <label className="label" htmlFor="token">
+                Personal Access Token (PAT)
+              </label>
+              <input
+                id="token"
+                type="password"
+                placeholder="설정 → 개인 설정 → Personal Access Tokens에서 발급"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+              />
+              <p className="muted small">
+                브라우저에서 직접 호출합니다. 토큰은 저장되지 않습니다. n8n 좌측 사이드바의
+                <strong> Settings → Personal Access Tokens</strong>에서 새 토큰을 만들 수 있습니다.
+              </p>
+            </>
+          )}
+
+          {authMode === 'basic' && (
+            <>
+              <label className="label" htmlFor="username">
+                사용자명
+              </label>
+              <input
+                id="username"
+                type="text"
+                placeholder="예: admin"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+              <label className="label" htmlFor="password">
+                비밀번호
+              </label>
+              <input
+                id="password"
+                type="password"
+                placeholder="비밀번호"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <p className="muted small">n8n에 Basic Auth를 켜둔 경우에만 사용할 수 있습니다.</p>
+            </>
+          )}
+
+          {authMode === 'cookie' && (
+            <p className="muted small">
+              동일 도메인/서브도메인에 로그인 세션 쿠키가 있을 때만 동작합니다. 다른 도메인에 띄우면
+              CORS와 세션 정책을 확인하세요.
+            </p>
+          )}
+
+          <button
+            className="primary wide"
+            disabled={!host || isLoading || (authMode === 'pat' && !token) || (authMode === 'basic' && (!username || !password))}
+            onClick={heroQuickImport}
+          >
             {isLoading ? '가져오는 중...' : '첫 템플릿 가져오기' }
           </button>
           {status && <p className="status">{status}</p>}

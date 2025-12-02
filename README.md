@@ -6,7 +6,7 @@
 - 템플릿 검색과 태그 필터링
 - 상세 모달에서 난이도/필요 자격증명/예상 셋업 시간 확인
 - JSON 미리보기 및 클립보드 복사
-- 호스트 URL + Personal Access Token(PAT) 입력 후 **POST /rest/workflows** 호출로 워크플로우 생성
+- 호스트 URL + 인증(개인 토큰 / Basic Auth / 세션 쿠키)으로 **POST /rest/workflows** 호출 후 워크플로우 생성
 - 예시 템플릿 3종 내장 (공지, 리드 처리, 데일리 리포트)
 
 ## 로컬 실행
@@ -46,9 +46,13 @@ helm upgrade --install template-gallery charts/n8n-template-gallery \
 - 퍼블릭 도메인 노출 시 Ingress + TLS 설정을 추천하며, n8n API 도메인에 대한 CORS 허용을 잊지 마세요.
 
 ## n8n API 연결 방법
-1. 갤러리 페이지 우측 패널에 **n8n 호스트 URL** 과 **PAT** 을 입력합니다.
-2. 카드 또는 모달의 "내 워크플로우로 가져오기" 버튼을 누르면 브라우저에서 직접 `POST /rest/workflows` 를 호출합니다.
-3. CORS 설정이 필요할 수 있으며, 토큰은 클라이언트에 저장하지 않습니다.
+1. 갤러리 페이지 우측 패널에 **n8n 호스트 URL**을 입력합니다.
+2. 인증 방식을 고릅니다.
+   - **Personal Access Token(PAT)**: n8n 좌측 사이드바 → **Settings → Personal Access Tokens**에서 토큰을 발급 후 입력합니다.
+   - **Basic Auth**: n8n에 Basic Auth를 켜둔 경우, 사용자명/비밀번호를 입력합니다.
+   - **세션 쿠키**: 갤러리와 n8n이 동일(또는 서브)도메인이고 이미 로그인 쿠키가 있을 때 Authorization 헤더 없이 호출합니다.
+3. 카드 또는 모달의 "내 워크플로우로 가져오기" 버튼을 누르면 브라우저에서 직접 `POST /rest/workflows` 를 호출합니다.
+4. 별도 서버에 자격증명을 저장하지 않으며, CORS/쿠키 정책은 배포 도메인에 맞춰 허용해야 합니다.
 
 ## 이 서비스에 DB가 필요한가요?
 - 기본적으로 **DB가 필요 없습니다.** 템플릿 메타데이터와 JSON은 정적 파일(`src/data/templates.ts`에서 번들)로 포함되어 있으며, 클라이언트가 n8n REST API를 직접 호출합니다.

@@ -23,6 +23,7 @@ export async function importWorkflow({ template, workflowName, apiKey, apiBase }
         nodes: template.nodes,
         connections: template.connections,
         tags: template.tags,
+        settings: template.settings ?? {},
       },
     }),
   });

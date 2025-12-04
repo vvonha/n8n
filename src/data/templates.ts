@@ -10,6 +10,7 @@ export type WorkflowTemplate = {
   diagramCaption?: string;
   nodes: unknown[];
   connections: Record<string, unknown>;
+  settings?: Record<string, unknown>;
   credentials?: string[];
   estimatedSetupMinutes?: number;
 };

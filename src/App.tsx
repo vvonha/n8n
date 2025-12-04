@@ -4,9 +4,6 @@ import { TemplateModal } from './components/TemplateModal';
 import { templates, WorkflowTemplate } from './data/templates';
 import { importWorkflow } from './utils/n8nClient';
 
-const FALLBACK_HOST = 'https://your-n8n-domain.com';
-type AuthMode = 'pat' | 'basic' | 'cookie';
-
 function copyToClipboard(content: string) {
   if (!navigator.clipboard) {
     alert('브라우저가 클립보드를 지원하지 않습니다. JSON을 직접 복사하세요.');
@@ -24,11 +21,6 @@ function App() {
   const [query, setQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<WorkflowTemplate | null>(null);
-  const [host, setHost] = useState(FALLBACK_HOST);
-  const [authMode, setAuthMode] = useState<AuthMode>('pat');
-  const [token, setToken] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [status, setStatus] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -49,28 +41,19 @@ function App() {
   }, [query, selectedTag]);
 
   const handleImport = async (template: WorkflowTemplate) => {
-    if (!host) {
-      setStatus('호스트 URL을 입력해주세요.');
-      return;
-    }
-
     setIsLoading(true);
-    setStatus('템플릿을 가져오는 중...');
+    setStatus('템플릿을 가져오는 중... (서버에서 n8n API 호출)');
     try {
       const workflowName = formatWorkflowName(template);
-      const workflowId = await importWorkflow({
-        host,
-        authMode,
-        token,
-        username,
-        password,
-        template,
-        workflowName,
-      });
-      setStatus(`가져오기 완료! 워크플로우 ID: ${workflowId}`);
+      const workflowId = await importWorkflow({ template, workflowName });
+      setStatus(
+        workflowId
+          ? `가져오기 완료! 워크플로우 ID: ${workflowId}`
+          : '가져오기 완료! 워크플로우가 생성되었습니다.',
+      );
     } catch (error) {
       console.error(error);
-      setStatus('가져오기에 실패했습니다. CORS 또는 토큰을 확인하세요.');
+      setStatus('가져오기에 실패했습니다. 서버 로그와 n8n API 키를 확인하세요.');
     } finally {
       setIsLoading(false);
     }
@@ -128,93 +111,16 @@ function App() {
           </div>
         </div>
         <div className="panel">
-          <p className="eyebrow">내 n8n에 연결</p>
-          <label className="label" htmlFor="host">
-            n8n 호스트 URL
-          </label>
-          <input
-            id="host"
-            type="text"
-            placeholder="https://your-n8n-domain.com"
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-          />
-          <div className="auth-modes" role="group" aria-label="인증 방식">
-            <button
-              className={authMode === 'pat' ? 'chip active' : 'chip'}
-              onClick={() => setAuthMode('pat')}
-            >
-              PAT
-            </button>
-            <button
-              className={authMode === 'basic' ? 'chip active' : 'chip'}
-              onClick={() => setAuthMode('basic')}
-            >
-              Basic Auth
-            </button>
-            <button
-              className={authMode === 'cookie' ? 'chip active' : 'chip'}
-              onClick={() => setAuthMode('cookie')}
-            >
-              세션 쿠키
-            </button>
-          </div>
-
-          {authMode === 'pat' && (
-            <>
-              <label className="label" htmlFor="token">
-                Personal Access Token (PAT)
-              </label>
-              <input
-                id="token"
-                type="password"
-                placeholder="설정 → 개인 설정 → Personal Access Tokens에서 발급"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-              />
-              <p className="muted small">
-                브라우저에서 직접 호출합니다. 토큰은 저장되지 않습니다. n8n 좌측 사이드바의
-                <strong> Settings → Personal Access Tokens</strong>에서 새 토큰을 만들 수 있습니다.
-              </p>
-            </>
-          )}
-
-          {authMode === 'basic' && (
-            <>
-              <label className="label" htmlFor="username">
-                사용자명
-              </label>
-              <input
-                id="username"
-                type="text"
-                placeholder="예: admin"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
-              <label className="label" htmlFor="password">
-                비밀번호
-              </label>
-              <input
-                id="password"
-                type="password"
-                placeholder="비밀번호"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <p className="muted small">n8n에 Basic Auth를 켜둔 경우에만 사용할 수 있습니다.</p>
-            </>
-          )}
-
-          {authMode === 'cookie' && (
-            <p className="muted small">
-              동일 도메인/서브도메인에 로그인 세션 쿠키가 있을 때만 동작합니다. 다른 도메인에 띄우면
-              CORS와 세션 정책을 확인하세요.
-            </p>
-          )}
+          <p className="eyebrow">서버 중계 모드</p>
+          <p className="muted">
+            브라우저는 더 이상 n8n REST API에 직접 요청하지 않습니다. 템플릿 갤러리 서버가 내부에서
+            <strong> /api/import-workflow</strong> 요청을 받아 <strong>n8n.ldccai.com</strong>으로 서버 간 통신을 합니다.
+            API 키는 서버 환경변수(N8N_API_KEY 또는 N8N_BASIC_AUTH_USER/ PASSWORD 등)로 주입하세요.
+          </p>
 
           <button
             className="primary wide"
-            disabled={!host || isLoading || (authMode === 'pat' && !token) || (authMode === 'basic' && (!username || !password))}
+            disabled={isLoading || filteredTemplates.length === 0}
             onClick={heroQuickImport}
           >
             {isLoading ? '가져오는 중...' : '첫 템플릿 가져오기' }

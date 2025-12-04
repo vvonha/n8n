@@ -9,6 +9,8 @@
 - 브라우저는 갤러리 서버의 **/api/import-workflow**만 호출하고, 서버가 내부에서 n8n REST API(`POST /api/v1/workflows` 혹은
   `/rest/workflows`)를 대리 호출해 워크플로우를 생성 (사용자별 API Key를 전달 가능)
 - 예시 템플릿 3종 내장 (공지, 리드 처리, 데일리 리포트)
+- 각 사용자가 UI에서 **n8n API 주소**(예: `https://n8n.ldccai.com/api/v1`)와 **Personal API Key**를 입력하면 해당 계정으로 워크플로우가
+  생성되며, 값은 브라우저 로컬에만 저장됩니다.
 
 ## 로컬 실행
 ```bash
@@ -51,11 +53,25 @@ helm upgrade --install template-gallery charts/n8n-template-gallery \
 - 퍼블릭 도메인 노출 시 Ingress + TLS 설정을 추천합니다. 브라우저는 갤러리 서버에만 요청하므로 n8n REST API의 CORS 설정은 필요하지 않습니다.
 
 ## n8n API 연결 방법 (서버 중계)
-1. 갤러리 서버에 **N8N_API_BASE**만 설정합니다. 예) `https://n8n.ldccai.com` (`/api/v1/workflows` 또는 `/rest/workflows`는 서버가 자동
-   붙입니다.) 필요하면 **N8N_WORKFLOWS_ENDPOINT**를 통해 완성된 URL을 직접 지정할 수도 있습니다.
-2. 사용자는 UI 상단에 **본인 계정의 Personal API Key**를 입력합니다. 요청 시 이 키가 서버로 전달되어 n8n REST API 호출 시 `X-N8N-API-KEY` 헤더에 그대로 실립니다.
-3. 각 사용자가 자신의 키를 입력하므로 생성된 워크플로우는 해당 사용자 소유로 등록됩니다. 서버에서 공용 키를 유지하지 않아도 됩니다.
-4. 서버 간 호출이므로 CORS/세션 쿠키 문제 없이 `POST /api/v1/workflows`(또는 `/rest/workflows`)가 실행됩니다.
+1. **환경변수는 "템플릿 갤러리 컨테이너"에 넣습니다.** n8n 서버 자체에 넣는 값이 아닙니다. Docker `-e` 플래그나 Helm `values.yaml`의 `env` 목록에 넣으시면 됩니다.
+2. UI에서 사용자가 **n8n API 주소**와 **Personal API Key**를 입력합니다. 주소는 브라우저 → 서버 요청 바디(`apiBase`)로 전달되며 서버가 그대로 n8n으로 대리 호출합니다. (값은 로컬스토리지에만 남습니다.)
+3. 서버 차원에서 기본값을 주고 싶다면 **N8N_API_BASE** 또는 **N8N_WORKFLOWS_ENDPOINT** 환경변수를 설정해 두세요. 요청 바디에 `apiBase`가 있으면 이를 우선 사용합니다.
+4. 각 사용자가 자신의 키를 입력하므로 생성된 워크플로우는 해당 사용자 소유로 등록됩니다. 서버에서 공용 키를 유지하지 않아도 됩니다.
+5. 서버 간 호출이므로 CORS/세션 쿠키 문제 없이 `POST /api/v1/workflows`(또는 `/rest/workflows`)가 실행됩니다.
+
+### Helm에서 환경변수 넣는 예시
+`charts/n8n-template-gallery/values.yaml` 의 `env` 배열에 추가하면 됩니다.
+
+```yaml
+env:
+  - name: N8N_API_BASE
+    value: https://n8n.ldccai.com
+  # 필요 시 완성된 엔드포인트를 직접 지정
+  # - name: N8N_WORKFLOWS_ENDPOINT
+  #   value: https://n8n.ldccai.com/api/v1/workflows
+```
+
+Docker 실행 시에는 컨테이너에 `-e N8N_API_BASE=...` 식으로 전달하면 동일하게 동작합니다.
 
 ## CORS 관련 참고
 - n8n은 REST API에 CORS 헤더를 기본 제공하지 않으므로, 브라우저에서 직접 n8n REST API를 호출하면 해결할 수 없는 CORS 오류가 발생합니다.

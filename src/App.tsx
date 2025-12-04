@@ -22,6 +22,10 @@ function App() {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<WorkflowTemplate | null>(null);
   const [status, setStatus] = useState<string>('');
+  const [apiBase, setApiBase] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('n8nApiBase') || '';
+  });
   const [apiKey, setApiKey] = useState<string>(() => {
     if (typeof window === 'undefined') return '';
     return localStorage.getItem('n8nApiKey') || '';
@@ -45,17 +49,23 @@ function App() {
   }, [query, selectedTag]);
 
   const handleImport = async (template: WorkflowTemplate) => {
+    if (!apiBase) {
+      setStatus('n8n API 주소를 입력해주세요. 예: https://n8n.ldccai.com/api/v1');
+      return;
+    }
+
     if (!apiKey) {
       setStatus('먼저 내 n8n 계정에서 발급한 API 키를 입력해주세요. (Settings → API)');
       return;
     }
 
+    localStorage.setItem('n8nApiBase', apiBase);
     localStorage.setItem('n8nApiKey', apiKey);
     setIsLoading(true);
     setStatus('템플릿을 가져오는 중... (서버가 내 키로 n8n API 호출)');
     try {
       const workflowName = formatWorkflowName(template);
-      const workflowId = await importWorkflow({ template, workflowName, apiKey });
+      const workflowId = await importWorkflow({ template, workflowName, apiKey, apiBase });
       setStatus(
         workflowId
           ? `가져오기 완료! 워크플로우 ID: ${workflowId}`
@@ -122,9 +132,19 @@ function App() {
         <div className="panel">
           <p className="eyebrow">서버 중계 모드</p>
           <p className="muted">
-            각 사용자는 자신의 n8n 계정에서 발급한
+            브라우저는 갤러리 서버의 <strong>/api/import-workflow</strong>만 호출하고, 서버가 내 API 키를 실어
+            내가 입력한 <strong>n8n API 주소</strong>로 서버-서버 호출을 수행합니다. 각 사용자는 자신의 n8n 계정에서 발급한
             **Personal API Key**를 아래에 입력하면 그 사용자 워크플로우로 생성됩니다.
           </p>
+
+          <div className="input-row">
+            <input
+              type="text"
+              placeholder="n8n API 주소 (예: https://n8n.ldccai.com/api/v1)"
+              value={apiBase}
+              onChange={(e) => setApiBase(e.target.value)}
+            />
+          </div>
 
           <div className="input-row">
             <input

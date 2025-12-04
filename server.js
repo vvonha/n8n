@@ -13,14 +13,15 @@ const templatesPath = path.join(__dirname, 'templates');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(distPath));
 
-function buildWorkflowEndpoint() {
+function buildWorkflowEndpoint(preferredBase) {
   // If a fully qualified workflows endpoint is provided, trust it as-is.
   if (process.env.N8N_WORKFLOWS_ENDPOINT) {
     return process.env.N8N_WORKFLOWS_ENDPOINT;
   }
 
-  // Accept either a base host or a partial API prefix; fall back to api/v1.
-  const rawBase = process.env.N8N_API_BASE || process.env.N8N_API_URL || 'https://n8n.ldccai.com';
+  const rawBase = preferredBase || process.env.N8N_API_BASE || process.env.N8N_API_URL;
+  if (!rawBase) return null;
+
   const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
 
   const url = new URL(base);
@@ -103,7 +104,12 @@ app.post('/api/import-workflow', async (req, res) => {
     });
   }
 
-  const endpoint = buildWorkflowEndpoint();
+  const endpoint = buildWorkflowEndpoint(req.body?.apiBase);
+  if (!endpoint) {
+    return res.status(400).json({
+      message: 'n8n API 주소가 설정되지 않았습니다. N8N_API_BASE 또는 N8N_WORKFLOWS_ENDPOINT 환경변수, 혹은 apiBase 필드를 전달하세요.',
+    });
+  }
   const payload = {
     name: name || resolved.name || 'Imported from template gallery',
     active: false,
@@ -131,7 +137,7 @@ app.post('/api/import-workflow', async (req, res) => {
       parsed = null;
     }
 
-    return res.status(201).json({ id: parsed?.id || null, raw: parsed || text });
+    return res.status(201).json({ id: parsed?.id || null, raw: parsed || text, endpoint });
   } catch (error) {
     console.error('[import-workflow] error', error);
     return res.status(500).json({ message: '템플릿 가져오기 서버 오류가 발생했습니다.', error: error.message });

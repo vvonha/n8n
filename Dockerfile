@@ -7,8 +7,14 @@ COPY tsconfig*.json vite.config.ts index.html ./
 COPY src ./src
 RUN npm run build
 
-# Production stage
-FROM nginx:1.27-alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# Production stage with server middleware
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm install --omit=dev
+COPY --from=builder /app/dist ./dist
+COPY server.js ./server.js
+COPY templates ./templates
+EXPOSE 3000
+CMD ["node", "server.js"]

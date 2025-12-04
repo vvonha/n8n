@@ -1,38 +1,30 @@
-{{- if .Values.ingress.enabled -}}
+{{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "n8n-template-gallery.fullname" . }}
-  labels:
-    app.kubernetes.io/name: {{ include "n8n-template-gallery.name" . }}
-    helm.sh/chart: {{ include "n8n-template-gallery.chart" . }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- with .Values.ingress.annotations }}
+  namespace: {{ .Release.Namespace }}
   annotations:
-{{ toYaml . | indent 4 }}
-{{- end }}
+{{ toYaml .Values.ingress.annotations | indent 4 }}
 spec:
-{{- if .Values.ingress.className }}
-  ingressClassName: {{ .Values.ingress.className }}
-{{- end }}
-  rules:
-{{- range .Values.ingress.hosts }}
-    - host: {{ .host }}
-      http:
-        paths:
-{{- range .paths }}
-          - path: {{ .path }}
-            pathType: {{ .pathType }}
-            backend:
-              service:
-                name: {{ include "n8n-template-gallery.fullname" $ }}
-                port:
-                  number: {{ $.Values.service.port }}
-{{- end }}
-{{- end }}
+  ingressClassName: {{ .Values.ingress.ingressClassName | quote }}
 {{- if .Values.ingress.tls }}
   tls:
 {{ toYaml .Values.ingress.tls | indent 4 }}
+{{- end }}
+  rules:
+{{- range .Values.ingress.hosts }}
+  - host: {{ .host | quote }}
+    http:
+      paths:
+{{- range .paths }}
+        - path: {{ .path | quote }}
+          pathType: {{ .pathType }}
+          backend:
+            service:
+              name: {{ include "n8n-template-gallery.fullname" $ }}
+              port:
+                number: {{ $.Values.service.port }}
+{{- end }}
 {{- end }}
 {{- end }}

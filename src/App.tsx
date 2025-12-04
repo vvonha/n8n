@@ -87,15 +87,14 @@ function App() {
       <div className="gradient" aria-hidden="true" />
       <header className="hero">
         <div>
-          <p className="eyebrow">n8n Template Gallery · 테스트용</p>
+          <p className="eyebrow">LOTTE AI n8n Template Gallery</p>
           <h1>
-            오너 템플릿을 <span className="accent">모두</span> 모아보고
+            n8n 템플릿을 <span className="accent">모두</span> 모아보고
             <br />
             원클릭으로 내 워크플로우에 추가하세요
           </h1>
           <p className="muted">
-            검색 · 태그 필터 · JSON 복사 · 내 n8n으로 바로 가져오기까지. 최신 UI 트렌드를 반영한 깔끔한
-            대시보드로 템플릿을 살펴보세요.
+            검색 · 태그 필터 · JSON 복사 · 내 n8n으로 바로 가져오기까지.
           </p>
           <div className="input-row">
             <input
@@ -123,8 +122,7 @@ function App() {
         <div className="panel">
           <p className="eyebrow">서버 중계 모드</p>
           <p className="muted">
-            브라우저는 갤러리 서버의 <strong>/api/import-workflow</strong>만 호출하고, 서버가 내 API 키를 실어
-            <strong>n8n.ldccai.com</strong>으로 서버-서버 호출을 수행합니다. 각 사용자는 자신의 n8n 계정에서 발급한
+            각 사용자는 자신의 n8n 계정에서 발급한
             **Personal API Key**를 아래에 입력하면 그 사용자 워크플로우로 생성됩니다.
           </p>
 

@@ -14,9 +14,32 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.static(distPath));
 
 function buildWorkflowEndpoint() {
-  const base = process.env.N8N_API_URL || 'https://n8n.ldccai.com/api/v1/';
-  const normalized = base.endsWith('/') ? base : `${base}/`;
-  return new URL('workflows', normalized).toString();
+  // If a fully qualified workflows endpoint is provided, trust it as-is.
+  if (process.env.N8N_WORKFLOWS_ENDPOINT) {
+    return process.env.N8N_WORKFLOWS_ENDPOINT;
+  }
+
+  // Accept either a base host or a partial API prefix; fall back to api/v1.
+  const rawBase = process.env.N8N_API_BASE || process.env.N8N_API_URL || 'https://n8n.ldccai.com';
+  const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+
+  const url = new URL(base);
+  const path = url.pathname;
+
+  // If someone already supplied /api/v1 or /rest without the resource name, append workflows.
+  if (path.includes('/api/v1/') && !path.includes('workflows')) {
+    url.pathname = path.endsWith('/') ? `${path}workflows` : `${path}/workflows`;
+    return url.toString();
+  }
+
+  if (path.includes('/rest/') && !path.includes('workflows')) {
+    url.pathname = path.endsWith('/') ? `${path}workflows` : `${path}/workflows`;
+    return url.toString();
+  }
+
+  // Default to the modern api/v1/workflows endpoint from the host root.
+  url.pathname = '/api/v1/workflows';
+  return url.toString();
 }
 
 function buildAuthHeaders(req) {

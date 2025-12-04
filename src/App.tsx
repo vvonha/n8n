@@ -122,8 +122,7 @@ function App() {
         <div className="panel">
           <p className="eyebrow">서버 중계 모드</p>
           <p className="muted">
-            브라우저는 갤러리 서버의 <strong>/api/import-workflow</strong>만 호출하고, 서버가 내 API 키를 실어
-            <strong>n8n.ldccai.com</strong>으로 서버-서버 호출을 수행합니다. 각 사용자는 자신의 n8n 계정에서 발급한
+            각 사용자는 자신의 n8n 계정에서 발급한
             **Personal API Key**를 아래에 입력하면 그 사용자 워크플로우로 생성됩니다.
           </p>
 

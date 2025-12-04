@@ -7,7 +7,7 @@
 - 상세 모달에서 난이도/필요 자격증명/예상 셋업 시간 확인
 - JSON 미리보기 및 클립보드 복사
 - 브라우저는 갤러리 서버의 **/api/import-workflow**만 호출하고, 서버가 내부에서 n8n REST API(`POST /api/v1/workflows`)를
-  대리 호출해 워크플로우를 생성
+  대리 호출해 워크플로우를 생성 (사용자별 API Key를 전달 가능)
 - 예시 템플릿 3종 내장 (공지, 리드 처리, 데일리 리포트)
 
 ## 로컬 실행
@@ -27,7 +27,6 @@ npm run preview -- --host 0.0.0.0 --port 4173
 docker build -t n8n-template-gallery .
 docker run -p 8080:3000 \
   -e N8N_API_URL=https://n8n.ldccai.com/api/v1 \
-  -e N8N_API_KEY=<your-api-key> \
   n8n-template-gallery
 ```
 
@@ -44,20 +43,17 @@ helm upgrade --install template-gallery charts/n8n-template-gallery \
   --set ingress.className=alb \
   --set ingress.hosts[0].host=gallery.example.com \
   --set ingress.hosts[0].paths[0].path=/ \
-  --set env[0].name=N8N_API_URL --set env[0].value=https://n8n.ldccai.com/api/v1 \
-  --set env[1].name=N8N_API_KEY --set env[1].value=<your-api-key>
+  --set env[0].name=N8N_API_URL --set env[0].value=https://n8n.ldccai.com/api/v1
 ```
 
 - 기본 설정은 HPA(cpu/memory 75%)가 활성화된 상태이며, `values.yaml`을 통해 `replicaCount`, 추가 환경변수(`env`), `serviceMonitor` 등을 조정할 수 있습니다.
 - 퍼블릭 도메인 노출 시 Ingress + TLS 설정을 추천합니다. 브라우저는 갤러리 서버에만 요청하므로 n8n REST API의 CORS 설정은 필요하지 않습니다.
 
 ## n8n API 연결 방법 (서버 중계)
-1. 갤러리 서버에 환경변수를 넣어둡니다.
-   - **N8N_API_URL**: 예) `https://n8n.ldccai.com/api/v1`
-   - **N8N_API_KEY** 또는 **N8N_BASIC_AUTH_USER / N8N_BASIC_AUTH_PASSWORD** (둘 중 하나)
-   - 필요 시 **N8N_BEARER_TOKEN** 도 지원합니다.
-2. 사용자는 UI에서 별도 토큰을 입력하지 않고, "내 워크플로우로 가져오기"를 누르면 브라우저 → 갤러리 서버 → n8n REST API 순으로 서버 간 통신이 일어납니다.
-3. 서버 간 호출이므로 CORS/세션 쿠키 문제 없이 `POST /api/v1/workflows`가 실행됩니다.
+1. 갤러리 서버에 **N8N_API_URL**만 설정합니다. 예) `https://n8n.ldccai.com/api/v1`
+2. 사용자는 UI 상단에 **본인 계정의 Personal API Key**를 입력합니다. 요청 시 이 키가 서버로 전달되어 n8n REST API 호출 시 `X-N8N-API-KEY` 헤더에 그대로 실립니다.
+3. 각 사용자가 자신의 키를 입력하므로 생성된 워크플로우는 해당 사용자 소유로 등록됩니다. 서버에서 공용 키를 유지하지 않아도 됩니다.
+4. 서버 간 호출이므로 CORS/세션 쿠키 문제 없이 `POST /api/v1/workflows`가 실행됩니다.
 
 ## CORS 관련 참고
 - n8n은 REST API에 CORS 헤더를 기본 제공하지 않으므로, 브라우저에서 직접 n8n REST API를 호출하면 해결할 수 없는 CORS 오류가 발생합니다.
@@ -73,7 +69,7 @@ helm upgrade --install template-gallery charts/n8n-template-gallery \
 - **ConfigMap 방식 예시:**
   1. `npm run build`로 생성된 `dist/`를 ConfigMap에 넣거나 Nginx-alpine 기반 이미지를 빌드합니다.
   2. Deployment에서 `/usr/share/nginx/html`을 ConfigMap/빈Dir로 마운트하면 코드 변경 시 롤링 업데이트만으로 반영 가능합니다.
-- **환경변수 주입:** 서버가 n8n을 호출할 수 있도록 `N8N_API_URL`과 인증 환경변수를 Deployment에 주입하세요.
+- **환경변수 주입:** 최소한 `N8N_API_URL`만 지정하면 됩니다. 공용 키를 쓰고 싶다면 `N8N_API_KEY` 등을 넣을 수 있지만, 다중 사용자라면 UI에서 사용자 개인 키를 입력받아 전달하는 구성을 권장합니다.
 - **네트워크:** EKS에서 퍼블릭 도메인으로 제공 시 Ingress(ALB/NGINX) + `https`를 적용합니다. 브라우저는 갤러리 서버에만 요청하므로 n8n API에 별도 CORS 설정이 필요 없습니다.
 
 ## 구조

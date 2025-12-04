@@ -22,6 +22,10 @@ function App() {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<WorkflowTemplate | null>(null);
   const [status, setStatus] = useState<string>('');
+  const [apiKey, setApiKey] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('n8nApiKey') || '';
+  });
   const [isLoading, setIsLoading] = useState(false);
 
   const availableTags = useMemo(() => {
@@ -41,11 +45,17 @@ function App() {
   }, [query, selectedTag]);
 
   const handleImport = async (template: WorkflowTemplate) => {
+    if (!apiKey) {
+      setStatus('먼저 내 n8n 계정에서 발급한 API 키를 입력해주세요. (Settings → API)');
+      return;
+    }
+
+    localStorage.setItem('n8nApiKey', apiKey);
     setIsLoading(true);
-    setStatus('템플릿을 가져오는 중... (서버에서 n8n API 호출)');
+    setStatus('템플릿을 가져오는 중... (서버가 내 키로 n8n API 호출)');
     try {
       const workflowName = formatWorkflowName(template);
-      const workflowId = await importWorkflow({ template, workflowName });
+      const workflowId = await importWorkflow({ template, workflowName, apiKey });
       setStatus(
         workflowId
           ? `가져오기 완료! 워크플로우 ID: ${workflowId}`
@@ -53,7 +63,7 @@ function App() {
       );
     } catch (error) {
       console.error(error);
-      setStatus('가져오기에 실패했습니다. 서버 로그와 n8n API 키를 확인하세요.');
+      setStatus('가져오기에 실패했습니다. 내 API 키가 맞는지 또는 서버 로그를 확인하세요.');
     } finally {
       setIsLoading(false);
     }
@@ -112,8 +122,19 @@ function App() {
         <div className="panel">
           <p className="eyebrow">서버 중계 모드</p>
           <p className="muted">
-            API 키는 서버 환경변수(N8N_API_KEY 또는 N8N_BASIC_AUTH_USER/ PASSWORD 등)로 주입하세요.
+            브라우저는 갤러리 서버의 <strong>/api/import-workflow</strong>만 호출하고, 서버가 내 API 키를 실어
+            <strong>n8n.ldccai.com</strong>으로 서버-서버 호출을 수행합니다. 각 사용자는 자신의 n8n 계정에서 발급한
+            **Personal API Key**를 아래에 입력하면 그 사용자 워크플로우로 생성됩니다.
           </p>
+
+          <div className="input-row">
+            <input
+              type="password"
+              placeholder="내 n8n Personal API Key (Settings → API에서 발급)"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+          </div>
 
           <button
             className="primary wide"

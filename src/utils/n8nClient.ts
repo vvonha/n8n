@@ -3,15 +3,18 @@ import { WorkflowTemplate } from '../data/templates';
 type ImportArgs = {
   template: WorkflowTemplate;
   workflowName: string;
+  apiKey?: string;
 };
 
-export async function importWorkflow({ template, workflowName }: ImportArgs) {
+export async function importWorkflow({ template, workflowName, apiKey }: ImportArgs) {
   const response = await fetch('/api/import-workflow', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(apiKey ? { 'X-N8N-API-KEY': apiKey } : {}),
     },
     body: JSON.stringify({
+      apiKey,
       name: workflowName,
       workflow: {
         name: workflowName,

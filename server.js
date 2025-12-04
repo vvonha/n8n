@@ -22,7 +22,13 @@ function buildWorkflowEndpoint() {
 function buildAuthHeaders(req) {
   const headers = { 'Content-Type': 'application/json' };
   const apiKeyHeader = req.headers['x-n8n-api-key'];
-  const apiKey = typeof apiKeyHeader === 'string' ? apiKeyHeader : process.env.N8N_API_KEY;
+  const apiKeyBody = req.body?.apiKey;
+  const apiKey =
+    typeof apiKeyHeader === 'string'
+      ? apiKeyHeader
+      : typeof apiKeyBody === 'string'
+        ? apiKeyBody
+        : process.env.N8N_API_KEY;
 
   if (apiKey) {
     return { ...headers, 'X-N8N-API-KEY': apiKey };
@@ -68,7 +74,10 @@ app.post('/api/import-workflow', async (req, res) => {
 
   const headers = buildAuthHeaders(req);
   if (!headers) {
-    return res.status(400).json({ message: 'n8n API 인증 정보가 설정되지 않았습니다. N8N_API_KEY 또는 BASIC/Bearer 환경변수를 확인하세요.' });
+    return res.status(400).json({
+      message:
+        'n8n API 인증 정보가 없습니다. 요청 헤더/바디로 X-N8N-API-KEY 또는 apiKey를 전달하거나 서버 환경변수를 설정하세요.',
+    });
   }
 
   const endpoint = buildWorkflowEndpoint();

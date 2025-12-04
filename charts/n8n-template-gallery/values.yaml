@@ -66,8 +66,10 @@ affinity: {}
 nodeSelector: {}
 tolerations: []
 
-env: []
-
+env:
+  - name: N8N_API_BASE
+    value: https://n8n.ldccai.com
+    
 livenessProbe:
   enabled: true
   path: /healthz

@@ -112,7 +112,6 @@ app.post('/api/import-workflow', async (req, res) => {
   }
   const payload = {
     name: name || resolved.name || 'Imported from template gallery',
-    active: false,
     nodes: resolved.nodes,
     connections: resolved.connections,
     settings: resolved.settings || {},

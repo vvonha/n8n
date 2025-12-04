@@ -115,7 +115,6 @@ app.post('/api/import-workflow', async (req, res) => {
     nodes: resolved.nodes,
     connections: resolved.connections,
     settings: resolved.settings || {},
-    tags: resolved.tags || [],
   };
 
   try {

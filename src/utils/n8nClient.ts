@@ -22,7 +22,6 @@ export async function importWorkflow({ template, workflowName, apiKey, apiBase }
         name: workflowName,
         nodes: template.nodes,
         connections: template.connections,
-        tags: template.tags,
         settings: template.settings ?? {},
       },
     }),

@@ -1,8 +1,8 @@
 replicaCount: 2
 
 image:
-  repository: n8n-template-gallery
-  tag: "latest"
+  repository: harbor.aiplatform.com:31043/n8n/n8n-template-gallery
+  tag: "v3.0.10-dev"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -29,15 +29,23 @@ service:
   port: 3000
 
 ingress:
-  enabled: false
-  className: ""
-  annotations: {}
+  enabled: true
+  ingressClassName: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-northeast-2:461548484502:certificate/12a851a4-1a8a-4af9-8c39-1ecd5766eb25
+    alb.ingress.kubernetes.io/security-groups: sg-0ecc845ec3bb8a611
+    alb.ingress.kubernetes.io/subnets: subnet-0f7790155accf0489,subnet-0514043a18f654028,subnet-09e88dab298a36beb,subnet-09fad3574d5bd6bef
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/group.name: ldccai-dev-alb-ingress
+    alb.ingress.kubernetes.io/group.order: '30'
   hosts:
-    - host: example.com
+    - host: n8n-template-gallery.ldccai.com
       paths:
         - path: /
           pathType: Prefix
-  tls: []
 
 autoscaling:
   enabled: true
@@ -58,8 +66,10 @@ affinity: {}
 nodeSelector: {}
 tolerations: []
 
-env: []
-
+env:
+  - name: N8N_API_BASE
+    value: https://n8n.ldccai.com
+    
 livenessProbe:
   enabled: true
   path: /healthz

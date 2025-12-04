@@ -97,15 +97,14 @@ function App() {
       <div className="gradient" aria-hidden="true" />
       <header className="hero">
         <div>
-          <p className="eyebrow">n8n Template Gallery · 테스트용</p>
+          <p className="eyebrow">LOTTE AI n8n Template Gallery</p>
           <h1>
-            오너 템플릿을 <span className="accent">모두</span> 모아보고
+            n8n 템플릿을 <span className="accent">모두</span> 모아보고
             <br />
             원클릭으로 내 워크플로우에 추가하세요
           </h1>
           <p className="muted">
-            검색 · 태그 필터 · JSON 복사 · 내 n8n으로 바로 가져오기까지. 최신 UI 트렌드를 반영한 깔끔한
-            대시보드로 템플릿을 살펴보세요.
+            검색 · 태그 필터 · JSON 복사 · 내 n8n으로 바로 가져오기까지.
           </p>
           <div className="input-row">
             <input

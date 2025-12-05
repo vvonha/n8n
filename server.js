@@ -1,6 +1,8 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,7 +12,9 @@ const app = express();
 const distPath = path.join(__dirname, 'dist');
 const templatesPath = path.join(__dirname, 'templates');
 
-app.use(express.json({ limit: '2mb' }));
+const execFileAsync = promisify(execFile);
+
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(distPath));
 
 function buildWorkflowEndpoint(preferredBase) {
@@ -83,6 +87,166 @@ async function loadTemplateFromDisk(templateId) {
     return null;
   }
 }
+
+function parseS3Path(rawPath) {
+  if (!rawPath) return null;
+
+  if (rawPath.startsWith('s3://')) {
+    const withoutScheme = rawPath.replace('s3://', '');
+    const [bucket, ...rest] = withoutScheme.split('/').filter(Boolean);
+    if (!bucket) return null;
+    const keyPrefix = rest.join('/');
+    return { bucket, keyPrefix: keyPrefix ? `${keyPrefix}${keyPrefix.endsWith('/') ? '' : '/'}` : '' };
+  }
+
+  try {
+    const parsed = new URL(rawPath);
+    const pathname = parsed.pathname.replace(/^\//, '');
+    const hostParts = parsed.hostname.split('.');
+    const bucket = hostParts[0];
+    const keyPrefix = pathname ? `${pathname}${pathname.endsWith('/') ? '' : '/'}` : '';
+    return { bucket, keyPrefix };
+  } catch (error) {
+    const [bucket, ...rest] = rawPath.split('/').filter(Boolean);
+    if (!bucket) return null;
+    const keyPrefix = rest.join('/');
+    return { bucket, keyPrefix: keyPrefix ? `${keyPrefix}${keyPrefix.endsWith('/') ? '' : '/'}` : '' };
+  }
+}
+
+async function runAwsCommand(args, { input } = {}) {
+  try {
+    const { stdout, stderr } = await execFileAsync('aws', args, {
+      input,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    return { stdout: stdout?.toString() ?? '', stderr: stderr?.toString() ?? '' };
+  } catch (error) {
+    const stderr = error?.stderr?.toString() || '';
+    const stdout = error?.stdout?.toString() || '';
+    throw new Error(`AWS CLI 실행 실패: ${stderr || stdout || error.message}`);
+  }
+}
+
+async function listTemplateKeysFromS3({ bucket, keyPrefix, region }) {
+  const args = ['s3api', 'list-objects-v2', '--bucket', bucket, '--output', 'json'];
+  if (keyPrefix) args.push('--prefix', keyPrefix);
+  if (region) args.push('--region', region);
+
+  const { stdout } = await runAwsCommand(args);
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout || '{}');
+  } catch (error) {
+    throw new Error(`S3 목록 응답을 JSON으로 파싱하지 못했습니다: ${error.message}`);
+  }
+
+  const contents = Array.isArray(parsed?.Contents) ? parsed.Contents : [];
+  return contents.map((item) => item.Key).filter((key) => key && key.endsWith('.json'));
+}
+
+async function loadTemplateFromS3(key, { bucket, region }) {
+  const args = ['s3', 'cp', `s3://${bucket}/${key}`, '-'];
+  if (region) args.push('--region', region);
+  const { stdout } = await runAwsCommand(args);
+  return JSON.parse(stdout || '{}');
+}
+
+async function uploadTemplateToS3(key, body, { bucket, region }) {
+  const args = ['s3', 'cp', '-', `s3://${bucket}/${key}`, '--content-type', 'application/json'];
+  if (region) args.push('--region', region);
+  await runAwsCommand(args, { input: body });
+}
+
+function getTemplateStorageConfig() {
+  const basePath = process.env.N8N_TEMPLATE_S3_PATH;
+  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
+  const parsed = parseS3Path(basePath);
+  if (!parsed) return null;
+  return { ...parsed, region };
+}
+
+function slugifyName(value) {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  if (slug) return slug;
+  return `template-${Date.now()}`;
+}
+
+function normalizeTemplatePayload(template) {
+  if (!template || typeof template !== 'object') {
+    throw new Error('템플릿 데이터가 비어있습니다.');
+  }
+
+  const required = ['name', 'description', 'difficulty', 'nodes', 'connections'];
+  required.forEach((field) => {
+    if (!template[field]) {
+      throw new Error(`필수 필드가 누락되었습니다: ${field}`);
+    }
+  });
+
+  const tags = Array.isArray(template.tags)
+    ? template.tags.map((tag) => String(tag).trim()).filter(Boolean)
+    : [];
+
+  return {
+    ...template,
+    id: template.id || slugifyName(template.name),
+    tags,
+    heroColor: template.heroColor || 'linear-gradient(120deg, #c084fc, #60a5fa)',
+    credentials: template.credentials?.filter((c) => c) ?? [],
+    estimatedSetupMinutes: template.estimatedSetupMinutes
+      ? Number(template.estimatedSetupMinutes)
+      : undefined,
+  };
+}
+
+app.get('/api/templates', async (_req, res) => {
+  const storage = getTemplateStorageConfig();
+  if (!storage) {
+    return res.status(500).json({ message: 'N8N_TEMPLATE_S3_PATH 환경변수를 설정해주세요.' });
+  }
+
+  try {
+    const keys = await listTemplateKeysFromS3(storage);
+    const templates = await Promise.all(
+      keys.map(async (key) => {
+        const template = await loadTemplateFromS3(key, storage);
+        if (!template.id) {
+          const filename = path.basename(key, '.json');
+          template.id = filename;
+        }
+        return template;
+      }),
+    );
+
+    res.json({ templates });
+  } catch (error) {
+    console.error('[template-list]', error);
+    res.status(500).json({ message: '템플릿을 불러오지 못했습니다. 서버 로그를 확인하세요.', error: error.message });
+  }
+});
+
+app.post('/api/templates', async (req, res) => {
+  const storage = getTemplateStorageConfig();
+  if (!storage) {
+    return res.status(500).json({ message: 'N8N_TEMPLATE_S3_PATH 환경변수를 설정해주세요.' });
+  }
+
+  try {
+    const template = normalizeTemplatePayload(req.body?.template || req.body);
+    const key = `${storage.keyPrefix}${template.id}.json`;
+    const body = JSON.stringify(template, null, 2);
+    await uploadTemplateToS3(key, body, storage);
+    res.status(201).json({ template, key });
+  } catch (error) {
+    console.error('[template-upload]', error);
+    res.status(500).json({ message: '템플릿 업로드에 실패했습니다.', error: error.message });
+  }
+});
 
 app.post('/api/import-workflow', async (req, res) => {
   const { templateId, workflow, name } = req.body || {};

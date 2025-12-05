@@ -132,13 +132,13 @@ function App() {
         <div className="panel">
           <p className="eyebrow">연결 정보 입력</p>
           <p className="muted">
-            n8n API URL과 자신의 n8n 계정에서 발급한 **Personal API Key**를 아래에 입력합니다.
+            n8n URL과 자신의 n8n 계정에서 발급한 Personal API Key를 아래에 입력합니다.
           </p>
 
           <div className="input-row">
             <input
               type="text"
-              placeholder="n8n API 주소 (예: https://n8n.ldccai.com/api/v1)"
+              placeholder="n8n 주소 (예: https://n8n.ldccai.com)"
               value={apiBase}
               onChange={(e) => setApiBase(e.target.value)}
             />
@@ -147,19 +147,12 @@ function App() {
           <div className="input-row">
             <input
               type="password"
-              placeholder="내 n8n Personal API Key (Settings → API에서 발급)"
+              placeholder="n8n Personal API Key (Settings → n8n API)"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />
           </div>
 
-          <button
-            className="primary wide"
-            disabled={isLoading || filteredTemplates.length === 0}
-            onClick={heroQuickImport}
-          >
-            {isLoading ? '가져오는 중...' : '첫 템플릿 가져오기' }
-          </button>
           {status && <p className="status">{status}</p>}
         </div>
       </header>

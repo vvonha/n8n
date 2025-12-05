@@ -160,7 +160,8 @@ async function uploadTemplateToS3(key, body, { bucket, region }) {
 
 function getTemplateStorageConfig() {
   const basePath = process.env.N8N_TEMPLATE_S3_PATH;
-  const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
+  const region =
+    process.env.N8N_S3_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || undefined;
   const parsed = parseS3Path(basePath);
   if (!parsed) return null;
   return { ...parsed, region };

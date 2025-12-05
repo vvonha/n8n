@@ -30,8 +30,7 @@ function App() {
     if (typeof window === 'undefined') return '';
     return localStorage.getItem('n8nApiKey') || '';
   });
-  // const [isLoading, setIsLoading] = useState(false);
-  const setIsLoading = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
@@ -85,13 +84,13 @@ function App() {
     setStatus('JSON이 클립보드에 복사되었습니다.');
   };
 
-  // const heroQuickImport = () => {
-  //   if (!filteredTemplates.length) {
-  //     setStatus('가져올 템플릿이 없습니다.');
-  //     return;
-  //   }
-  //   handleImport(filteredTemplates[0]);
-  // };
+  const heroQuickImport = () => {
+    if (!filteredTemplates.length) {
+      setStatus('가져올 템플릿이 없습니다.');
+      return;
+    }
+    handleImport(filteredTemplates[0]);
+  };
 
   return (
     <div className="page">
@@ -154,13 +153,13 @@ function App() {
             />
           </div>
 
-          {/* <button
+          <button
             className="primary wide"
             disabled={isLoading || filteredTemplates.length === 0}
             onClick={heroQuickImport}
           >
             {isLoading ? '가져오는 중...' : '첫 템플릿 가져오기' }
-          </button> */}
+          </button>
           
           {status && <p className="status">{status}</p>}
         </div>

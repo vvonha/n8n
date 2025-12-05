@@ -31,7 +31,8 @@ function App() {
     return localStorage.getItem('n8nApiKey') || '';
   });
   // const [isLoading, setIsLoading] = useState(false);
-
+  const setIsLoading = useState(false);
+  
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
     templates.forEach((t) => t.tags.forEach((tag) => tagSet.add(tag)));

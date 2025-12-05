@@ -397,6 +397,12 @@ button:disabled {
   appearance: none;
 }
 
+.hint {
+  color: #94a3b8;
+  font-size: 13px;
+  margin: 0;
+}
+
 .gradient-options {
   display: flex;
   flex-wrap: wrap;

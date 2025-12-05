@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { TemplateCard } from './components/TemplateCard';
 import { TemplateModal } from './components/TemplateModal';
 import { TemplateUploadModal } from './components/TemplateUploadModal';
-import { templates as fallbackTemplates, WorkflowTemplate } from './data/templates';
+import { WorkflowTemplate } from './data/templates';
 import { importWorkflow } from './utils/n8nClient';
 import { fetchTemplatesFromApi, uploadTemplateToApi } from './utils/templatesClient';
 
@@ -25,7 +25,7 @@ function App() {
   const [selectedTemplate, setSelectedTemplate] = useState<WorkflowTemplate | null>(null);
   const [status, setStatus] = useState<string>('');
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>(fallbackTemplates);
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
@@ -43,14 +43,10 @@ function App() {
     async function load() {
       try {
         const remote = await fetchTemplatesFromApi();
-        if (remote.length > 0) {
-          setTemplates(remote);
-        } else {
-          setTemplates([]);
-        }
+        setTemplates(remote);
       } catch (error) {
         console.error(error);
-        setStatus('S3 템플릿을 불러오지 못했습니다. 로컬 템플릿을 표시합니다.');
+        setStatus('템플릿을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
       } finally {
         setIsLoadingTemplates(false);
       }
@@ -281,7 +277,7 @@ function App() {
           {filteredTemplates.length === 0 && !isLoadingTemplates && (
             <p className="muted">조건에 맞는 템플릿이 없습니다.</p>
           )}
-          {isLoadingTemplates && <p className="muted">S3에서 템플릿을 불러오는 중...</p>}
+          {isLoadingTemplates && <p className="muted">템플릿을 불러오는 중입니다.</p>}
         </div>
       </main>
 

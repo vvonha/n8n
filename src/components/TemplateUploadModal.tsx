@@ -10,6 +10,9 @@ const gradients = [
   'linear-gradient(135deg, #34d399, #10b981)',
 ];
 
+const allowedDiagramTypes = ['image/jpeg', 'image/png', 'image/svg+xml'];
+const maxDiagramSizeMb = 5;
+
 type TemplateUploadModalProps = {
   open: boolean;
   onClose: () => void;
@@ -75,6 +78,21 @@ export function TemplateUploadModal({ open, onClose, onSubmit, isSaving, existin
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    if (!allowedDiagramTypes.includes(file.type)) {
+      setError('구성도 이미지는 JPG, PNG, SVG 형식만 업로드할 수 있습니다.');
+      event.target.value = '';
+      return;
+    }
+
+    const sizeMb = file.size / 1024 / 1024;
+    if (sizeMb > maxDiagramSizeMb) {
+      setError(`구성도 이미지는 최대 ${maxDiagramSizeMb}MB까지 업로드할 수 있습니다.`);
+      event.target.value = '';
+      return;
+    }
+
+    setError('');
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -216,7 +234,12 @@ export function TemplateUploadModal({ open, onClose, onSubmit, isSaving, existin
           <div className="field inline">
             <div>
               <p className="label">구성도 이미지</p>
-              <input type="file" accept="image/*" onChange={handleFileChange} />
+              <input
+                type="file"
+                accept="image/png, image/jpeg, image/svg+xml"
+                onChange={handleFileChange}
+              />
+              <p className="hint">JPG · PNG · SVG만 가능하며, 최대 {maxDiagramSizeMb}MB까지 업로드할 수 있습니다.</p>
               {form.diagramPreview && <img className="diagram-preview" src={form.diagramPreview} alt="미리보기" />}
             </div>
             <div>

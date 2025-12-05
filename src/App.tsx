@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { TemplateCard } from './components/TemplateCard';
 import { TemplateModal } from './components/TemplateModal';
-import { templates, WorkflowTemplate } from './data/templates';
+import { TemplateUploadModal } from './components/TemplateUploadModal';
+import { templates as fallbackTemplates, WorkflowTemplate } from './data/templates';
 import { importWorkflow } from './utils/n8nClient';
+import { fetchTemplatesFromApi, uploadTemplateToApi } from './utils/templatesClient';
 
 function copyToClipboard(content: string) {
   if (!navigator.clipboard) {
@@ -23,6 +25,10 @@ function App() {
   const [selectedTemplate, setSelectedTemplate] = useState<WorkflowTemplate | null>(null);
   const [status, setStatus] = useState<string>('');
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>(fallbackTemplates);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [apiBase, setApiBase] = useState<string>(() => {
     if (typeof window === 'undefined') return '';
     return localStorage.getItem('n8nApiBase') || '';
@@ -33,11 +39,31 @@ function App() {
   });
   const [isLoading, setIsLoading] = useState(false);
   
+  useEffect(() => {
+    async function load() {
+      try {
+        const remote = await fetchTemplatesFromApi();
+        if (remote.length > 0) {
+          setTemplates(remote);
+        } else {
+          setTemplates([]);
+        }
+      } catch (error) {
+        console.error(error);
+        setStatus('S3 템플릿을 불러오지 못했습니다. 로컬 템플릿을 표시합니다.');
+      } finally {
+        setIsLoadingTemplates(false);
+      }
+    }
+
+    load();
+  }, []);
+
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
     templates.forEach((t) => t.tags.forEach((tag) => tagSet.add(tag)));
     return Array.from(tagSet).sort();
-  }, []);
+  }, [templates]);
 
   const filteredTemplates = useMemo(() => {
     return templates.filter((template) => {
@@ -47,11 +73,11 @@ function App() {
       const matchesTag = selectedTag ? template.tags.includes(selectedTag) : true;
       return matchesQuery && matchesTag;
     });
-  }, [query, selectedTag]);
+  }, [query, selectedTag, templates]);
 
   const selectedTemplates = useMemo(
     () => templates.filter((template) => selectedTemplateIds.has(template.id)),
-    [selectedTemplateIds],
+    [selectedTemplateIds, templates],
   );
 
   const toggleTemplateSelection = (templateId: string) => {
@@ -100,6 +126,21 @@ function App() {
   const handleCopy = (template: WorkflowTemplate) => {
     copyToClipboard(JSON.stringify({ name: template.name, nodes: template.nodes, connections: template.connections }, null, 2));
     setStatus('JSON이 클립보드에 복사되었습니다.');
+  };
+
+  const handleTemplateUpload = async (template: WorkflowTemplate) => {
+    setIsSavingTemplate(true);
+    try {
+      const saved = await uploadTemplateToApi(template);
+      setTemplates((prev) => [saved, ...prev.filter((t) => t.id !== saved.id)]);
+      setStatus('S3에 템플릿이 업로드되었습니다.');
+      setIsUploadOpen(false);
+    } catch (error) {
+      console.error(error);
+      setStatus('템플릿 업로드에 실패했습니다. 서버 로그를 확인하세요.');
+    } finally {
+      setIsSavingTemplate(false);
+    }
   };
 
   const importSelectedTemplates = async () => {
@@ -158,13 +199,18 @@ function App() {
           <p className="muted">
             검색 · 태그 필터 · JSON 복사 · 내 n8n으로 바로 가져오기까지.
           </p>
-          <div className="input-row">
-            <input
-              type="text"
-              placeholder="템플릿 검색 (예: 슬랙, CRM, 공지)"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+          <div className="action-row">
+            <div className="input-row grow">
+              <input
+                type="text"
+                placeholder="템플릿 검색 (예: 슬랙, CRM, 공지)"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <button className="ghost" onClick={() => setIsUploadOpen(true)}>
+              + 템플릿 업로드
+            </button>
           </div>
           <div className="tags">
             <button className={!selectedTag ? 'chip active' : 'chip'} onClick={() => setSelectedTag(null)}>
@@ -232,7 +278,10 @@ function App() {
               isSelected={selectedTemplateIds.has(template.id)}
             />
           ))}
-          {filteredTemplates.length === 0 && <p className="muted">조건에 맞는 템플릿이 없습니다.</p>}
+          {filteredTemplates.length === 0 && !isLoadingTemplates && (
+            <p className="muted">조건에 맞는 템플릿이 없습니다.</p>
+          )}
+          {isLoadingTemplates && <p className="muted">S3에서 템플릿을 불러오는 중...</p>}
         </div>
       </main>
 
@@ -241,6 +290,13 @@ function App() {
         onClose={() => setSelectedTemplate(null)}
         onCopyJson={handleCopy}
         onImport={handleImport}
+      />
+      <TemplateUploadModal
+        open={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
+        onSubmit={handleTemplateUpload}
+        isSaving={isSavingTemplate}
+        existingIds={new Set(templates.map((t) => t.id))}
       />
     </div>
   );

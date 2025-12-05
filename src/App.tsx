@@ -130,11 +130,9 @@ function App() {
           </div>
         </div>
         <div className="panel">
-          <p className="eyebrow">서버 중계 모드</p>
+          <p className="eyebrow">연결 정보 입력</p>
           <p className="muted">
-            브라우저는 갤러리 서버의 <strong>/api/import-workflow</strong>만 호출하고, 서버가 내 API 키를 실어
-            내가 입력한 <strong>n8n API 주소</strong>로 서버-서버 호출을 수행합니다. 각 사용자는 자신의 n8n 계정에서 발급한
-            **Personal API Key**를 아래에 입력하면 그 사용자 워크플로우로 생성됩니다.
+            n8n API URL과 자신의 n8n 계정에서 발급한 **Personal API Key**를 아래에 입력합니다.
           </p>
 
           <div className="input-row">

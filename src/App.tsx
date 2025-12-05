@@ -22,6 +22,7 @@ function App() {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<WorkflowTemplate | null>(null);
   const [status, setStatus] = useState<string>('');
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(new Set());
   const [apiBase, setApiBase] = useState<string>(() => {
     if (typeof window === 'undefined') return '';
     return localStorage.getItem('n8nApiBase') || '';
@@ -47,6 +48,23 @@ function App() {
       return matchesQuery && matchesTag;
     });
   }, [query, selectedTag]);
+
+  const selectedTemplates = useMemo(
+    () => templates.filter((template) => selectedTemplateIds.has(template.id)),
+    [selectedTemplateIds],
+  );
+
+  const toggleTemplateSelection = (templateId: string) => {
+    setSelectedTemplateIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(templateId)) {
+        next.delete(templateId);
+      } else {
+        next.add(templateId);
+      }
+      return next;
+    });
+  };
 
   const handleImport = async (template: WorkflowTemplate) => {
     if (!apiBase) {
@@ -84,12 +102,46 @@ function App() {
     setStatus('JSON이 클립보드에 복사되었습니다.');
   };
 
-  const heroQuickImport = () => {
-    if (!filteredTemplates.length) {
-      setStatus('가져올 템플릿이 없습니다.');
+  const importSelectedTemplates = async () => {
+    if (selectedTemplates.length === 0) {
+      setStatus('가져올 템플릿을 선택해주세요.');
       return;
     }
-    handleImport(filteredTemplates[0]);
+
+    if (!apiBase) {
+      setStatus('n8n API 주소를 입력해주세요. 예: https://n8n.ldccai.com/api/v1');
+      return;
+    }
+
+    if (!apiKey) {
+      setStatus('먼저 내 n8n 계정에서 발급한 API 키를 입력해주세요. (Settings → API)');
+      return;
+    }
+
+    localStorage.setItem('n8nApiBase', apiBase);
+    localStorage.setItem('n8nApiKey', apiKey);
+
+    setIsLoading(true);
+    setStatus('선택한 템플릿을 가져오는 중...');
+
+    const results: string[] = [];
+
+    try {
+      for (const template of selectedTemplates) {
+        try {
+          const workflowName = formatWorkflowName(template);
+          const workflowId = await importWorkflow({ template, workflowName, apiKey, apiBase });
+          results.push(`${template.name}: ${workflowId ? `ID ${workflowId}` : '완료'}`);
+        } catch (error) {
+          console.error(error);
+          results.push(`${template.name}: 실패`);
+        }
+      }
+
+      setStatus(`가져오기 완료 (${selectedTemplates.length}개). ${results.join(' | ')}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -153,14 +205,16 @@ function App() {
             />
           </div>
 
+          <p className="muted small">선택된 템플릿: {selectedTemplateIds.size}개</p>
+
           <button
             className="primary wide"
-            disabled={isLoading || filteredTemplates.length === 0}
-            onClick={heroQuickImport}
+            disabled={isLoading || selectedTemplateIds.size === 0}
+            onClick={importSelectedTemplates}
           >
-            {isLoading ? '가져오는 중...' : '첫 템플릿 가져오기' }
+            {isLoading ? '가져오는 중...' : '선택한 템플릿 가져오기' }
           </button>
-          
+
           {status && <p className="status">{status}</p>}
         </div>
       </header>
@@ -174,6 +228,8 @@ function App() {
               onSelect={setSelectedTemplate}
               onCopyJson={handleCopy}
               onImport={handleImport}
+              onToggleSelect={toggleTemplateSelection}
+              isSelected={selectedTemplateIds.has(template.id)}
             />
           ))}
           {filteredTemplates.length === 0 && <p className="muted">조건에 맞는 템플릿이 없습니다.</p>}

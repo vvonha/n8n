@@ -1,8 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -11,8 +10,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const distPath = path.join(__dirname, 'dist');
 const templatesPath = path.join(__dirname, 'templates');
-
-const execFileAsync = promisify(execFile);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(distPath));
@@ -114,18 +111,54 @@ function parseS3Path(rawPath) {
   }
 }
 
-async function runAwsCommand(args, { input } = {}) {
-  try {
-    const { stdout, stderr } = await execFileAsync('aws', args, {
-      input,
-      maxBuffer: 20 * 1024 * 1024,
+async function runAwsCommand(args, { input, timeoutMs = 30000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('aws', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timeout;
+
+    if (timeoutMs > 0) {
+      timeout = setTimeout(() => {
+        child.kill('SIGTERM');
+        settled = true;
+        reject(new Error(`AWS CLI 시간 초과(${timeoutMs}ms): aws ${args.join(' ')}`));
+      }, timeoutMs);
+    }
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
     });
-    return { stdout: stdout?.toString() ?? '', stderr: stderr?.toString() ?? '' };
-  } catch (error) {
-    const stderr = error?.stderr?.toString() || '';
-    const stdout = error?.stdout?.toString() || '';
-    throw new Error(`AWS CLI 실행 실패: ${stderr || stdout || error.message}`);
-  }
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      reject(new Error(`AWS CLI 실행 실패: ${stderr || error.message}`));
+    });
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      if (code !== 0) {
+        reject(new Error(`AWS CLI 종료 코드 ${code}: ${stderr || stdout}`));
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+
+    if (input) {
+      child.stdin.write(input);
+    }
+    child.stdin.end();
+  });
 }
 
 async function listTemplateKeysFromS3({ bucket, keyPrefix, region }) {

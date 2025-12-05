@@ -69,6 +69,8 @@ tolerations: []
 env:
   - name: N8N_API_BASE
     value: https://n8n.ldccai.com
+  - name: N8N_TEMPLATE_S3_PATH
+    value: s3://ldccai-s3-bucket-n8n/templates/
     
 livenessProbe:
   enabled: true

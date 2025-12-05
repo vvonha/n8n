@@ -1,7 +1,8 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
-import crypto from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,6 +11,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const distPath = path.join(__dirname, 'dist');
 const templatesPath = path.join(__dirname, 'templates');
+
+const execFileAsync = promisify(execFile);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(distPath));
@@ -111,206 +114,48 @@ function parseS3Path(rawPath) {
   }
 }
 
-function buildS3BaseUrl({ bucket, region }) {
-  const normalizedRegion = region && region !== 'us-east-1' ? `.${region}` : '';
-  return `https://${bucket}.s3${normalizedRegion}.amazonaws.com`;
-}
-
-function sha256Hex(value) {
-  return crypto.createHash('sha256').update(value).digest('hex');
-}
-
-function hmac(key, value) {
-  return crypto.createHmac('sha256', key).update(value).digest();
-}
-
-function getSignatureKey(secretKey, dateStamp, region, service) {
-  const kDate = hmac(`AWS4${secretKey}`, dateStamp);
-  const kRegion = hmac(kDate, region);
-  const kService = hmac(kRegion, service);
-  return hmac(kService, 'aws4_request');
-}
-
-function encodePath(key) {
-  return key
-    .split('/')
-    .map((part) => encodeURIComponent(part))
-    .join('/');
-}
-
-let cachedAwsCredentials = null;
-
-function isCredentialExpired(credential) {
-  if (!credential?.expiration) return false;
-  const expiration = new Date(credential.expiration).getTime();
-  // Refresh 2 minutes before actual expiration to be safe.
-  return Date.now() > expiration - 2 * 60 * 1000;
-}
-
-async function fetchWebIdentityCredentials() {
-  const tokenFile = process.env.AWS_WEB_IDENTITY_TOKEN_FILE;
-  const roleArn = process.env.AWS_ROLE_ARN;
-  if (!tokenFile || !roleArn) return null;
-
-  const token = await fs.readFile(tokenFile, 'utf-8');
-  const form = new URLSearchParams({
-    Action: 'AssumeRoleWithWebIdentity',
-    RoleArn: roleArn,
-    RoleSessionName: `n8n-template-gallery-${Date.now()}`,
-    Version: '2011-06-15',
-    WebIdentityToken: token,
-  });
-
-  const response = await fetch('https://sts.amazonaws.com/', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' },
-    body: form.toString(),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`웹 아이덴티티 토큰으로 STS 자격 증명을 가져오지 못했습니다: ${text}`);
+async function runAwsCommand(args, { input } = {}) {
+  try {
+    const { stdout, stderr } = await execFileAsync('aws', args, {
+      input,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    return { stdout: stdout?.toString() ?? '', stderr: stderr?.toString() ?? '' };
+  } catch (error) {
+    const stderr = error?.stderr?.toString() || '';
+    const stdout = error?.stdout?.toString() || '';
+    throw new Error(`AWS CLI 실행 실패: ${stderr || stdout || error.message}`);
   }
-
-  const xml = await response.text();
-  const accessKey = xml.match(/<AccessKeyId>([^<]+)<\/AccessKeyId>/)?.[1];
-  const secretKey = xml.match(/<SecretAccessKey>([^<]+)<\/SecretAccessKey>/)?.[1];
-  const sessionToken = xml.match(/<SessionToken>([^<]+)<\/SessionToken>/)?.[1];
-  const expiration = xml.match(/<Expiration>([^<]+)<\/Expiration>/)?.[1];
-
-  if (!accessKey || !secretKey || !sessionToken) {
-    throw new Error('STS 응답에서 자격 증명을 파싱하지 못했습니다.');
-  }
-
-  return { accessKey, secretKey, token: sessionToken, expiration };
-}
-
-async function getAwsCredentials() {
-  if (cachedAwsCredentials && !isCredentialExpired(cachedAwsCredentials)) {
-    return cachedAwsCredentials;
-  }
-
-  const envAccessKey = process.env.AWS_ACCESS_KEY_ID;
-  const envSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
-  const envToken = process.env.AWS_SESSION_TOKEN;
-
-  if (envAccessKey && envSecretKey) {
-    cachedAwsCredentials = { accessKey: envAccessKey, secretKey: envSecretKey, token: envToken };
-    return cachedAwsCredentials;
-  }
-
-  const webIdentity = await fetchWebIdentityCredentials();
-  if (webIdentity) {
-    cachedAwsCredentials = webIdentity;
-    return cachedAwsCredentials;
-  }
-
-  throw new Error('사용 가능한 AWS 자격 증명을 찾을 수 없습니다.');
-}
-
-async function signS3Request({ method, url, region, headers = {}, body = '' }) {
-  const { accessKey, secretKey, token } = await getAwsCredentials();
-
-  const now = new Date();
-  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}Z$/g, '').slice(0, 15) + 'Z';
-  const dateStamp = amzDate.slice(0, 8);
-
-  const parsed = new URL(url);
-  const sortedParams = Array.from(parsed.searchParams.entries()).sort(([a], [b]) => a.localeCompare(b));
-  const canonicalQueryString = sortedParams
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-    .join('&');
-
-  const payloadHash = sha256Hex(body);
-  const mergedHeaders = {
-    host: parsed.host,
-    'x-amz-date': amzDate,
-    'x-amz-content-sha256': payloadHash,
-    ...(token ? { 'x-amz-security-token': token } : {}),
-    ...headers,
-  };
-
-  const canonicalHeadersEntries = Object.entries(mergedHeaders).map(([key, value]) => [
-    key.toLowerCase(),
-    typeof value === 'string' ? value.trim() : String(value).trim(),
-  ]);
-
-  const sortedHeaders = canonicalHeadersEntries.sort(([a], [b]) => a.localeCompare(b));
-  const canonicalHeaders = sortedHeaders.map(([k, v]) => `${k}:${v}\n`).join('');
-  const signedHeaders = sortedHeaders.map(([k]) => k).join(';');
-
-  const canonicalRequest = [
-    method,
-    parsed.pathname,
-    canonicalQueryString,
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash,
-  ].join('\n');
-
-  const credentialScope = `${dateStamp}/${region}/s3/aws4_request`;
-  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256Hex(canonicalRequest)].join('\n');
-  const signingKey = getSignatureKey(secretKey, dateStamp, region, 's3');
-  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
-
-  const authorizationHeader =
-    `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
-  return {
-    headers: {
-      ...Object.fromEntries(sortedHeaders),
-      Authorization: authorizationHeader,
-      'x-amz-content-sha256': payloadHash,
-    },
-  };
-}
-
-async function fetchFromS3({ method, bucket, region, key, queryParams = {}, headers = {}, body = '' }) {
-  const baseUrl = buildS3BaseUrl({ bucket, region });
-  const normalizedKey = key ? key.replace(/^\//, '') : '';
-  const url = new URL(`${baseUrl}/${encodePath(normalizedKey)}`);
-  Object.entries(queryParams).forEach(([k, v]) => {
-    if (v !== undefined && v !== null) url.searchParams.set(k, v);
-  });
-
-  const signed = await signS3Request({ method, url: url.toString(), region, headers, body });
-  const response = await fetch(url.toString(), { method, headers: signed.headers, body });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`S3 요청 실패 (${response.status}): ${text}`);
-  }
-  return response;
 }
 
 async function listTemplateKeysFromS3({ bucket, keyPrefix, region }) {
-  const response = await fetchFromS3({
-    method: 'GET',
-    bucket,
-    region,
-    key: '',
-    queryParams: { 'list-type': '2', prefix: keyPrefix },
-  });
+  const args = ['s3api', 'list-objects-v2', '--bucket', bucket, '--output', 'json'];
+  if (keyPrefix) args.push('--prefix', keyPrefix);
+  if (region) args.push('--region', region);
 
-  const xml = await response.text();
-  const matches = Array.from(xml.matchAll(/<Key>([^<]+)<\/Key>/g)).map((match) => match[1]);
-  return matches.filter((key) => key.endsWith('.json'));
+  const { stdout } = await runAwsCommand(args);
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout || '{}');
+  } catch (error) {
+    throw new Error(`S3 목록 응답을 JSON으로 파싱하지 못했습니다: ${error.message}`);
+  }
+
+  const contents = Array.isArray(parsed?.Contents) ? parsed.Contents : [];
+  return contents.map((item) => item.Key).filter((key) => key && key.endsWith('.json'));
 }
 
 async function loadTemplateFromS3(key, { bucket, region }) {
-  const response = await fetchFromS3({ method: 'GET', bucket, region, key });
-  const text = await response.text();
-  return JSON.parse(text);
+  const args = ['s3', 'cp', `s3://${bucket}/${key}`, '-'];
+  if (region) args.push('--region', region);
+  const { stdout } = await runAwsCommand(args);
+  return JSON.parse(stdout || '{}');
 }
 
 async function uploadTemplateToS3(key, body, { bucket, region }) {
-  await fetchFromS3({
-    method: 'PUT',
-    bucket,
-    region,
-    key,
-    headers: { 'content-type': 'application/json' },
-    body,
-  });
+  const args = ['s3', 'cp', '-', `s3://${bucket}/${key}`, '--content-type', 'application/json'];
+  if (region) args.push('--region', region);
+  await runAwsCommand(args, { input: body });
 }
 
 function getTemplateStorageConfig() {

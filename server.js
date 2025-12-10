@@ -162,20 +162,31 @@ async function runAwsCommand(args, { input, timeoutMs = 30000 } = {}) {
 }
 
 async function listTemplateKeysFromS3({ bucket, keyPrefix, region }) {
-  const args = ['s3api', 'list-objects-v2', '--bucket', bucket, '--output', 'json'];
-  if (keyPrefix) args.push('--prefix', keyPrefix);
-  if (region) args.push('--region', region);
+  let continuationToken;
+  const keys = [];
 
-  const { stdout } = await runAwsCommand(args);
-  let parsed;
-  try {
-    parsed = JSON.parse(stdout || '{}');
-  } catch (error) {
-    throw new Error(`S3 목록 응답을 JSON으로 파싱하지 못했습니다: ${error.message}`);
-  }
+  do {
+    const args = ['s3api', 'list-objects-v2', '--bucket', bucket, '--output', 'json'];
+    if (keyPrefix) args.push('--prefix', keyPrefix);
+    if (region) args.push('--region', region);
+    if (continuationToken) args.push('--continuation-token', continuationToken);
 
-  const contents = Array.isArray(parsed?.Contents) ? parsed.Contents : [];
-  return contents.map((item) => item.Key).filter((key) => key && key.endsWith('.json'));
+    const { stdout } = await runAwsCommand(args);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout || '{}');
+    } catch (error) {
+      throw new Error(`S3 목록 응답을 JSON으로 파싱하지 못했습니다: ${error.message}`);
+    }
+
+    const contents = Array.isArray(parsed?.Contents) ? parsed.Contents : [];
+    keys.push(...contents.map((item) => item.Key).filter((key) => key && key.endsWith('.json')));
+
+    continuationToken = parsed?.IsTruncated ? parsed.NextContinuationToken : null;
+  } while (continuationToken);
+
+  return keys;
 }
 
 async function loadTemplateFromS3(key, { bucket, region }) {
@@ -208,6 +219,24 @@ function slugifyName(value) {
     .slice(0, 80);
   if (slug) return slug;
   return `template-${Date.now()}`;
+}
+
+async function mapWithConcurrency(items, limit, iterator) {
+  const concurrency = Math.max(1, Number(limit) || 1);
+  const results = new Array(items.length);
+  let index = 0;
+
+  async function worker() {
+    while (true) {
+      const currentIndex = index++;
+      if (currentIndex >= items.length) break;
+      results[currentIndex] = await iterator(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, worker);
+  await Promise.all(workers);
+  return results;
 }
 
 function normalizeTemplatePayload(template) {
@@ -246,16 +275,15 @@ app.get('/api/templates', async (_req, res) => {
 
   try {
     const keys = await listTemplateKeysFromS3(storage);
-    const templates = await Promise.all(
-      keys.map(async (key) => {
-        const template = await loadTemplateFromS3(key, storage);
-        if (!template.id) {
-          const filename = path.basename(key, '.json');
-          template.id = filename;
-        }
-        return template;
-      }),
-    );
+    const fetchConcurrency = Number(process.env.N8N_TEMPLATE_FETCH_CONCURRENCY) || 5;
+    const templates = await mapWithConcurrency(keys, fetchConcurrency, async (key) => {
+      const template = await loadTemplateFromS3(key, storage);
+      if (!template.id) {
+        const filename = path.basename(key, '.json');
+        template.id = filename;
+      }
+      return template;
+    });
 
     res.json({ templates });
   } catch (error) {

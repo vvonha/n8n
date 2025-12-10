@@ -11,6 +11,17 @@ export async function fetchTemplatesFromApi(): Promise<WorkflowTemplate[]> {
   return data.templates || [];
 }
 
+export async function fetchTemplateDetailFromApi(templateId: string): Promise<WorkflowTemplate> {
+  const response = await fetch(`/api/templates/${templateId}`);
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || '템플릿 상세를 불러오지 못했습니다.');
+  }
+
+  const data = (await response.json()) as { template: WorkflowTemplate };
+  return data.template;
+}
+
 export async function uploadTemplateToApi(template: WorkflowTemplate) {
   const response = await fetch('/api/templates', {
     method: 'POST',

@@ -4,7 +4,11 @@ import { TemplateModal } from './components/TemplateModal';
 import { TemplateUploadModal } from './components/TemplateUploadModal';
 import { WorkflowTemplate } from './data/templates';
 import { importWorkflow } from './utils/n8nClient';
-import { fetchTemplatesFromApi, uploadTemplateToApi } from './utils/templatesClient';
+import {
+  fetchTemplateDetailFromApi,
+  fetchTemplatesFromApi,
+  uploadTemplateToApi,
+} from './utils/templatesClient';
 
 function copyToClipboard(content: string) {
   if (!navigator.clipboard) {
@@ -38,6 +42,8 @@ function App() {
     return localStorage.getItem('n8nApiKey') || '';
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [isHydrating, setIsHydrating] = useState(false);
+  const isBusy = isLoading || isHydrating;
   
   useEffect(() => {
     async function load() {
@@ -88,7 +94,33 @@ function App() {
     });
   };
 
+  const ensureTemplateHydrated = async (template: WorkflowTemplate) => {
+    if (template.nodes && template.connections) return template;
+
+    setIsHydrating(true);
+    setStatus('템플릿 세부 정보를 불러오는 중입니다...');
+
+    try {
+      const full = await fetchTemplateDetailFromApi(template.id);
+      setTemplates((prev) => prev.map((item) => (item.id === full.id ? { ...item, ...full } : item)));
+      return full;
+    } catch (error) {
+      console.error(error);
+      setStatus('템플릿 세부 정보 로딩에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      throw error;
+    } finally {
+      setIsHydrating(false);
+    }
+  };
+
   const handleImport = async (template: WorkflowTemplate) => {
+    let hydrated: WorkflowTemplate;
+    try {
+      hydrated = await ensureTemplateHydrated(template);
+    } catch (error) {
+      return;
+    }
+
     if (!apiBase) {
       setStatus('n8n API 주소를 입력해주세요. 예: https://n8n.ldccai.com/api/v1');
       return;
@@ -104,8 +136,8 @@ function App() {
     setIsLoading(true);
     setStatus('템플릿을 가져오는 중... (서버가 내 키로 n8n API 호출)');
     try {
-      const workflowName = formatWorkflowName(template);
-      const workflowId = await importWorkflow({ template, workflowName, apiKey, apiBase });
+      const workflowName = formatWorkflowName(hydrated);
+      const workflowId = await importWorkflow({ template: hydrated, workflowName, apiKey, apiBase });
       setStatus(
         workflowId
           ? `가져오기 완료! 워크플로우 ID: ${workflowId}`
@@ -120,8 +152,23 @@ function App() {
   };
 
   const handleCopy = (template: WorkflowTemplate) => {
-    copyToClipboard(JSON.stringify({ name: template.name, nodes: template.nodes, connections: template.connections }, null, 2));
-    setStatus('JSON이 클립보드에 복사되었습니다.');
+    ensureTemplateHydrated(template)
+      .then((hydrated) => {
+        copyToClipboard(
+          JSON.stringify({ name: hydrated.name, nodes: hydrated.nodes, connections: hydrated.connections }, null, 2),
+        );
+        setStatus('JSON이 클립보드에 복사되었습니다.');
+      })
+      .catch(() => {});
+  };
+
+  const handleSelectTemplate = async (template: WorkflowTemplate) => {
+    try {
+      const hydrated = await ensureTemplateHydrated(template);
+      setSelectedTemplate(hydrated);
+    } catch (error) {
+      return;
+    }
   };
 
   const handleTemplateUpload = async (template: WorkflowTemplate) => {
@@ -166,9 +213,10 @@ function App() {
     try {
       for (const template of selectedTemplates) {
         try {
-          const workflowName = formatWorkflowName(template);
-          const workflowId = await importWorkflow({ template, workflowName, apiKey, apiBase });
-          results.push(`${template.name}: ${workflowId ? `ID ${workflowId}` : '완료'}`);
+          const hydrated = await ensureTemplateHydrated(template);
+          const workflowName = formatWorkflowName(hydrated);
+          const workflowId = await importWorkflow({ template: hydrated, workflowName, apiKey, apiBase });
+          results.push(`${hydrated.name}: ${workflowId ? `ID ${workflowId}` : '완료'}`);
         } catch (error) {
           console.error(error);
           results.push(`${template.name}: 실패`);
@@ -251,10 +299,10 @@ function App() {
 
           <button
             className="primary wide"
-            disabled={isLoading || selectedTemplateIds.size === 0}
+            disabled={isBusy || selectedTemplateIds.size === 0}
             onClick={importSelectedTemplates}
           >
-            {isLoading ? '가져오는 중...' : '선택한 템플릿 가져오기' }
+            {isBusy ? '가져오는 중...' : '선택한 템플릿 가져오기' }
           </button>
 
           {status && <p className="status">{status}</p>}
@@ -267,7 +315,7 @@ function App() {
             <TemplateCard
               key={template.id}
               template={template}
-              onSelect={setSelectedTemplate}
+              onSelect={handleSelectTemplate}
               onCopyJson={handleCopy}
               onImport={handleImport}
               onToggleSelect={toggleTemplateSelection}

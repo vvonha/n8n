@@ -10,9 +10,25 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const distPath = path.join(__dirname, 'dist');
 const templatesPath = path.join(__dirname, 'templates');
+const templateCache = new Map();
+const TEMPLATE_CACHE_TTL_MS = Number(process.env.N8N_TEMPLATE_CACHE_TTL_MS) || 10 * 60 * 1000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(distPath));
+
+function getCache(key) {
+  const cached = templateCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt < Date.now()) {
+    templateCache.delete(key);
+    return null;
+  }
+  return cached.value;
+}
+
+function setCache(key, value) {
+  templateCache.set(key, { value, expiresAt: Date.now() + TEMPLATE_CACHE_TTL_MS });
+}
 
 function buildWorkflowEndpoint(preferredBase) {
   // If a fully qualified workflows endpoint is provided, trust it as-is.
@@ -239,6 +255,26 @@ async function mapWithConcurrency(items, limit, iterator) {
   return results;
 }
 
+async function loadTemplateManifest(storage) {
+  const manifestKey = process.env.N8N_TEMPLATE_MANIFEST_KEY;
+  if (!manifestKey) return null;
+
+  const key = manifestKey.startsWith(storage.keyPrefix)
+    ? manifestKey
+    : `${storage.keyPrefix}${manifestKey}`;
+
+  const manifest = await loadTemplateFromS3(key, storage);
+  const items = Array.isArray(manifest?.templates)
+    ? manifest.templates
+    : Array.isArray(manifest)
+      ? manifest
+      : [];
+
+  if (!items.length) return null;
+
+  return items.map((item) => normalizeTemplateMetadata(item, storage));
+}
+
 function normalizeTemplatePayload(template) {
   if (!template || typeof template !== 'object') {
     throw new Error('템플릿 데이터가 비어있습니다.');
@@ -267,28 +303,103 @@ function normalizeTemplatePayload(template) {
   };
 }
 
+function normalizeTemplateMetadata(template, storage) {
+  if (!template || typeof template !== 'object') {
+    throw new Error('템플릿 데이터가 비어있습니다.');
+  }
+
+  const required = ['name', 'description', 'difficulty'];
+  required.forEach((field) => {
+    if (!template[field]) {
+      throw new Error(`필수 필드가 누락되었습니다: ${field}`);
+    }
+  });
+
+  const tags = Array.isArray(template.tags)
+    ? template.tags.map((tag) => String(tag).trim()).filter(Boolean)
+    : [];
+
+  const s3Key = template.s3Key
+    ? template.s3Key.startsWith(storage.keyPrefix)
+      ? template.s3Key
+      : `${storage.keyPrefix}${template.s3Key}`
+    : undefined;
+
+  return {
+    ...template,
+    id: template.id || slugifyName(template.name),
+    tags,
+    heroColor: template.heroColor || 'linear-gradient(120deg, #c084fc, #60a5fa)',
+    credentials: template.credentials?.filter((c) => c) ?? [],
+    estimatedSetupMinutes: template.estimatedSetupMinutes
+      ? Number(template.estimatedSetupMinutes)
+      : undefined,
+    s3Key,
+  };
+}
+
 app.get('/api/templates', async (_req, res) => {
   const storage = getTemplateStorageConfig();
   if (!storage) {
     return res.status(500).json({ message: 'N8N_TEMPLATE_S3_PATH 환경변수를 설정해주세요.' });
   }
 
-  try {
-    const keys = await listTemplateKeysFromS3(storage);
-    const fetchConcurrency = Number(process.env.N8N_TEMPLATE_FETCH_CONCURRENCY) || 5;
-    const templates = await mapWithConcurrency(keys, fetchConcurrency, async (key) => {
-      const template = await loadTemplateFromS3(key, storage);
-      if (!template.id) {
-        const filename = path.basename(key, '.json');
-        template.id = filename;
-      }
-      return template;
-    });
+  const cached = getCache('templates:list');
+  if (cached) {
+    return res.json({ templates: cached });
+  }
 
+  try {
+    const manifestTemplates = await loadTemplateManifest(storage);
+    let templates = manifestTemplates || [];
+
+    if (!templates.length) {
+      const keys = await listTemplateKeysFromS3(storage);
+      const fetchConcurrency = Number(process.env.N8N_TEMPLATE_FETCH_CONCURRENCY) || 5;
+      templates = await mapWithConcurrency(keys, fetchConcurrency, async (key) => {
+        const template = await loadTemplateFromS3(key, storage);
+        if (!template.id) {
+          const filename = path.basename(key, '.json');
+          template.id = filename;
+        }
+        return { ...template, s3Key: key };
+      });
+    }
+
+    setCache('templates:list', templates);
     res.json({ templates });
   } catch (error) {
     console.error('[template-list]', error);
     res.status(500).json({ message: '템플릿을 불러오지 못했습니다. 서버 로그를 확인하세요.', error: error.message });
+  }
+});
+
+app.get('/api/templates/:id', async (req, res) => {
+  const storage = getTemplateStorageConfig();
+  if (!storage) {
+    return res.status(500).json({ message: 'N8N_TEMPLATE_S3_PATH 환경변수를 설정해주세요.' });
+  }
+
+  const templateId = req.params.id;
+  const cacheKey = `template:${templateId}`;
+  const cached = getCache(cacheKey);
+  if (cached) {
+    return res.json({ template: cached });
+  }
+
+  try {
+    const cachedList = getCache('templates:list');
+    const hint = Array.isArray(cachedList) ? cachedList.find((item) => item.id === templateId) : null;
+    const s3Key = hint?.s3Key || `${storage.keyPrefix}${templateId}.json`;
+
+    const template = await loadTemplateFromS3(s3Key, storage);
+    if (!template.id) template.id = templateId;
+    const normalized = { ...normalizeTemplatePayload(template), s3Key };
+    setCache(cacheKey, normalized);
+    return res.json({ template: normalized });
+  } catch (error) {
+    console.error('[template-detail]', error);
+    res.status(500).json({ message: '템플릿 상세를 불러오지 못했습니다.', error: error.message });
   }
 });
 
@@ -303,6 +414,7 @@ app.post('/api/templates', async (req, res) => {
     const key = `${storage.keyPrefix}${template.id}.json`;
     const body = JSON.stringify(template, null, 2);
     await uploadTemplateToS3(key, body, storage);
+    templateCache.clear();
     res.status(201).json({ template, key });
   } catch (error) {
     console.error('[template-upload]', error);

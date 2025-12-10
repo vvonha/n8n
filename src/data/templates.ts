@@ -8,11 +8,15 @@ export type WorkflowTemplate = {
   preview?: string;
   diagramImage?: string;
   diagramCaption?: string;
-  nodes: unknown[];
-  connections: Record<string, unknown>;
+  nodes?: unknown[];
+  connections?: Record<string, unknown>;
   settings?: Record<string, unknown>;
   credentials?: string[];
   estimatedSetupMinutes?: number;
+  /**
+   * S3 key for lazy fetching. When omitted, the server will assume `${id}.json` under the configured prefix.
+   */
+  s3Key?: string;
 };
 
 // Templates are now sourced from S3 at runtime via the template API.

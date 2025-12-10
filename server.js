@@ -338,6 +338,12 @@ function normalizeTemplateMetadata(template, storage) {
   };
 }
 
+function toTemplateMetadata(template, storage) {
+  const normalized = normalizeTemplateMetadata(template, storage);
+  const { nodes, connections, settings, ...metadata } = normalized;
+  return metadata;
+}
+
 app.get('/api/templates', async (_req, res) => {
   const storage = getTemplateStorageConfig();
   if (!storage) {
@@ -366,8 +372,9 @@ app.get('/api/templates', async (_req, res) => {
       });
     }
 
-    setCache('templates:list', templates);
-    res.json({ templates });
+    const metadata = templates.map((template) => toTemplateMetadata(template, storage));
+    setCache('templates:list', metadata);
+    res.json({ templates: metadata });
   } catch (error) {
     console.error('[template-list]', error);
     res.status(500).json({ message: '템플릿을 불러오지 못했습니다. 서버 로그를 확인하세요.', error: error.message });

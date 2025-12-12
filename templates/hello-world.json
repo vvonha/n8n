@@ -1,0 +1,47 @@
+{
+  "id": "hello-world",
+  "name": "Hello World Trigger",
+  "description": "테스트 및 로컬 진단용으로 사용할 수 있는 가장 작은 템플릿입니다. 웹훅으로 Hello World를 받아 Slack으로 전송합니다.",
+  "tags": ["demo", "local"],
+  "difficulty": "Beginner",
+  "heroColor": "linear-gradient(135deg, #22c55e, #0ea5e9)",
+  "estimatedSetupMinutes": 2,
+  "credentials": [],
+  "nodes": [
+    {
+      "parameters": {
+        "path": "hello-world",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "Webhooks1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "text": "Hello from the local template gallery!"
+      },
+      "id": "Set1",
+      "name": "Set",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [520, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Set",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

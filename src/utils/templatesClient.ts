@@ -1,7 +1,10 @@
 import { WorkflowTemplate } from '../data/templates';
 
+const apiBase = (import.meta.env.VITE_TEMPLATE_API_BASE as string | undefined)?.replace(/\/$/, '') || '';
+const buildUrl = (path: string) => `${apiBase}${path}`;
+
 export async function fetchTemplatesFromApi(): Promise<WorkflowTemplate[]> {
-  const response = await fetch('/api/templates');
+  const response = await fetch(buildUrl('/api/templates'));
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message || '템플릿 목록을 불러오지 못했습니다.');
@@ -12,7 +15,7 @@ export async function fetchTemplatesFromApi(): Promise<WorkflowTemplate[]> {
 }
 
 export async function fetchTemplateDetailFromApi(templateId: string): Promise<WorkflowTemplate> {
-  const response = await fetch(`/api/templates/${templateId}`);
+  const response = await fetch(buildUrl(`/api/templates/${templateId}`));
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message || '템플릿 상세를 불러오지 못했습니다.');
@@ -23,7 +26,7 @@ export async function fetchTemplateDetailFromApi(templateId: string): Promise<Wo
 }
 
 export async function uploadTemplateToApi(template: WorkflowTemplate) {
-  const response = await fetch('/api/templates', {
+  const response = await fetch(buildUrl('/api/templates'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ template }),

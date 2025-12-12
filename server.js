@@ -101,6 +101,28 @@ async function loadTemplateFromDisk(templateId) {
   }
 }
 
+async function listTemplatesFromDisk() {
+  let entries;
+  try {
+    entries = await fs.readdir(templatesPath, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+  const jsonFiles = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.json'));
+
+  const templates = [];
+  for (const file of jsonFiles) {
+    const templateId = file.name.replace(/\.json$/, '');
+    const loaded = await loadTemplateFromDisk(templateId);
+    if (loaded) {
+      templates.push({ ...normalizeTemplatePayload(loaded), id: loaded.id || templateId });
+    }
+  }
+
+  return templates;
+}
+
 function parseS3Path(rawPath) {
   if (!rawPath) return null;
 
@@ -340,16 +362,23 @@ function normalizeTemplateMetadata(template, storage) {
 
 app.get('/api/templates', async (_req, res) => {
   const storage = getTemplateStorageConfig();
-  if (!storage) {
-    return res.status(500).json({ message: 'N8N_TEMPLATE_S3_PATH 환경변수를 설정해주세요.' });
-  }
 
-  const cached = getCache('templates:list');
+  const cacheKey = 'templates:list';
+  const cached = getCache(cacheKey);
   if (cached) {
     return res.json({ templates: cached });
   }
 
   try {
+    if (!storage) {
+      const templates = await listTemplatesFromDisk();
+      if (!templates.length) {
+        return res.status(404).json({ message: '로컬 템플릿을 찾을 수 없습니다. templates 폴더를 확인하세요.' });
+      }
+      setCache(cacheKey, templates);
+      return res.json({ templates });
+    }
+
     const manifestTemplates = await loadTemplateManifest(storage);
     let templates = manifestTemplates || [];
 
@@ -366,7 +395,7 @@ app.get('/api/templates', async (_req, res) => {
       });
     }
 
-    setCache('templates:list', templates);
+    setCache(cacheKey, templates);
     res.json({ templates });
   } catch (error) {
     console.error('[template-list]', error);
@@ -376,10 +405,6 @@ app.get('/api/templates', async (_req, res) => {
 
 app.get('/api/templates/:id', async (req, res) => {
   const storage = getTemplateStorageConfig();
-  if (!storage) {
-    return res.status(500).json({ message: 'N8N_TEMPLATE_S3_PATH 환경변수를 설정해주세요.' });
-  }
-
   const templateId = req.params.id;
   const cacheKey = `template:${templateId}`;
   const cached = getCache(cacheKey);
@@ -388,6 +413,16 @@ app.get('/api/templates/:id', async (req, res) => {
   }
 
   try {
+    if (!storage) {
+      const template = await loadTemplateFromDisk(templateId);
+      if (!template) {
+        return res.status(404).json({ message: `템플릿 ${templateId}을(를) 찾을 수 없습니다.` });
+      }
+      const normalized = normalizeTemplatePayload(template);
+      setCache(cacheKey, normalized);
+      return res.json({ template: normalized });
+    }
+
     const cachedList = getCache('templates:list');
     const hint = Array.isArray(cachedList) ? cachedList.find((item) => item.id === templateId) : null;
     const s3Key = hint?.s3Key || `${storage.keyPrefix}${templateId}.json`;
@@ -399,7 +434,9 @@ app.get('/api/templates/:id', async (req, res) => {
     return res.json({ template: normalized });
   } catch (error) {
     console.error('[template-detail]', error);
-    res.status(500).json({ message: '템플릿 상세를 불러오지 못했습니다.', error: error.message });
+    const isMissing = /NoSuchKey|Not Found/i.test(error?.message || '');
+    const status = isMissing ? 404 : 500;
+    res.status(status).json({ message: '템플릿 상세를 불러오지 못했습니다.', error: error.message });
   }
 });
 

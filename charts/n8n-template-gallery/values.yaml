@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: harbor.aiplatform.com:31043/n8n/n8n-template-gallery
-  tag: "v3.0.44-dev"
+  tag: "v3.0.45-dev"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

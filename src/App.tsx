@@ -278,6 +278,7 @@ function App() {
           </p>
 
           <div className="input-row">
+            <p className="muted small">n8n URL</p>
             <input
               type="text"
               placeholder="n8n 주소 (예: https://n8n.ldccai.com)"
@@ -287,6 +288,7 @@ function App() {
           </div>
 
           <div className="input-row">
+            <p className="muted small">Personal API Key</p>
             <input
               type="password"
               placeholder="n8n Personal API Key (Settings → n8n API)"

@@ -1,8 +1,12 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
-import { spawn } from 'child_process';
+import https from "https";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 import { fileURLToPath } from 'url';
+import { ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,9 +16,38 @@ const distPath = path.join(__dirname, 'dist');
 const templatesPath = path.join(__dirname, 'templates');
 const templateCache = new Map();
 const TEMPLATE_CACHE_TTL_MS = Number(process.env.N8N_TEMPLATE_CACHE_TTL_MS) || 10 * 60 * 1000;
+const inFlight = new Map();
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  requestHandler: new NodeHttpHandler({ httpsAgent }),
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(distPath));
+
+async function cachedFetch(key, ttlMs, fetcher) {
+  const cached = getCache(key);
+  if (cached) return cached;
+
+  if (inFlight.has(key)) return inFlight.get(key);
+
+  const p = (async () => {
+    const v = await fetcher();
+    templateCache.set(key, { value: v, expiresAt: Date.now() + ttlMs });
+    return v;
+  })().finally(() => inFlight.delete(key));
+
+  inFlight.set(key, p);
+  return p;
+}
+
+async function streamToString(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf-8");
+}
 
 function getCache(key) {
   const cached = templateCache.get(key);
@@ -24,10 +57,6 @@ function getCache(key) {
     return null;
   }
   return cached.value;
-}
-
-function setCache(key, value) {
-  templateCache.set(key, { value, expiresAt: Date.now() + TEMPLATE_CACHE_TTL_MS });
 }
 
 function buildWorkflowEndpoint(preferredBase) {
@@ -105,22 +134,22 @@ async function listTemplatesFromDisk() {
   let entries;
   try {
     entries = await fs.readdir(templatesPath, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === 'ENOENT') return [];
-    throw error;
+  } catch (e) {
+    if (e?.code === 'ENOENT') return [];
+    throw e;
   }
-  const jsonFiles = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.json'));
 
-  const templates = [];
-  for (const file of jsonFiles) {
+  const jsonFiles = entries.filter((e) => e.isFile() && e.name.endsWith('.json'));
+  const fetchConcurrency = Number(process.env.N8N_TEMPLATE_FETCH_CONCURRENCY) || 5;
+
+  const templates = await mapWithConcurrency(jsonFiles, fetchConcurrency, async (file) => {
     const templateId = file.name.replace(/\.json$/, '');
     const loaded = await loadTemplateFromDisk(templateId);
-    if (loaded) {
-      templates.push({ ...normalizeTemplatePayload(loaded), id: loaded.id || templateId });
-    }
-  }
+    if (!loaded) return null;
+    return { ...normalizeTemplatePayload(loaded), id: loaded.id || templateId };
+  });
 
-  return templates;
+  return templates.filter(Boolean);
 }
 
 function parseS3Path(rawPath) {
@@ -149,95 +178,40 @@ function parseS3Path(rawPath) {
   }
 }
 
-async function runAwsCommand(args, { input, timeoutMs = 30000 } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn('aws', args, { stdio: ['pipe', 'pipe', 'pipe'] });
 
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    let timeout;
-
-    if (timeoutMs > 0) {
-      timeout = setTimeout(() => {
-        child.kill('SIGTERM');
-        settled = true;
-        reject(new Error(`AWS CLI 시간 초과(${timeoutMs}ms): aws ${args.join(' ')}`));
-      }, timeoutMs);
-    }
-
-    child.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    child.on('error', (error) => {
-      if (settled) return;
-      settled = true;
-      if (timeout) clearTimeout(timeout);
-      reject(new Error(`AWS CLI 실행 실패: ${stderr || error.message}`));
-    });
-
-    child.on('close', (code) => {
-      if (settled) return;
-      settled = true;
-      if (timeout) clearTimeout(timeout);
-      if (code !== 0) {
-        reject(new Error(`AWS CLI 종료 코드 ${code}: ${stderr || stdout}`));
-      } else {
-        resolve({ stdout, stderr });
-      }
-    });
-
-    if (input) {
-      child.stdin.write(input);
-    }
-    child.stdin.end();
-  });
-}
-
-async function listTemplateKeysFromS3({ bucket, keyPrefix, region }) {
+async function listTemplateKeysFromS3({ bucket, keyPrefix }) {
   let continuationToken;
   const keys = [];
 
   do {
-    const args = ['s3api', 'list-objects-v2', '--bucket', bucket, '--output', 'json'];
-    if (keyPrefix) args.push('--prefix', keyPrefix);
-    if (region) args.push('--region', region);
-    if (continuationToken) args.push('--continuation-token', continuationToken);
+    const resp = await s3.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: keyPrefix || undefined,
+      ContinuationToken: continuationToken,
+    }));
 
-    const { stdout } = await runAwsCommand(args);
+    const contents = Array.isArray(resp.Contents) ? resp.Contents : [];
+    keys.push(...contents.map((i) => i.Key).filter((k) => k && k.endsWith('.json')));
 
-    let parsed;
-    try {
-      parsed = JSON.parse(stdout || '{}');
-    } catch (error) {
-      throw new Error(`S3 목록 응답을 JSON으로 파싱하지 못했습니다: ${error.message}`);
-    }
-
-    const contents = Array.isArray(parsed?.Contents) ? parsed.Contents : [];
-    keys.push(...contents.map((item) => item.Key).filter((key) => key && key.endsWith('.json')));
-
-    continuationToken = parsed?.IsTruncated ? parsed.NextContinuationToken : null;
+    continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
   } while (continuationToken);
 
   return keys;
 }
 
-async function loadTemplateFromS3(key, { bucket, region }) {
-  const args = ['s3', 'cp', `s3://${bucket}/${key}`, '-'];
-  if (region) args.push('--region', region);
-  const { stdout } = await runAwsCommand(args);
-  return JSON.parse(stdout || '{}');
+async function loadTemplateFromS3(key, { bucket }) {
+  const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const text = await streamToString(resp.Body);
+  return JSON.parse(text || "{}");
 }
 
-async function uploadTemplateToS3(key, body, { bucket, region }) {
-  const args = ['s3', 'cp', '-', `s3://${bucket}/${key}`, '--content-type', 'application/json'];
-  if (region) args.push('--region', region);
-  await runAwsCommand(args, { input: body });
+async function uploadTemplateToS3(key, body, { bucket }) {
+  await s3.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: body,
+    ContentType: "application/json",
+  }));
 }
 
 function getTemplateStorageConfig() {
@@ -362,81 +336,65 @@ function normalizeTemplateMetadata(template, storage) {
 
 app.get('/api/templates', async (_req, res) => {
   const storage = getTemplateStorageConfig();
-
-  const cacheKey = 'templates:list';
-  const cached = getCache(cacheKey);
-  if (cached) {
-    return res.json({ templates: cached });
-  }
-
   try {
-    if (!storage) {
-      const templates = await listTemplatesFromDisk();
-      if (!templates.length) {
-        return res.status(404).json({ message: '로컬 템플릿을 찾을 수 없습니다. templates 폴더를 확인하세요.' });
+    const templates = await cachedFetch('templates:list', TEMPLATE_CACHE_TTL_MS, async () => {
+      if (!storage) {
+        const t = await listTemplatesFromDisk();
+        if (!t.length) throw new Error('NO_LOCAL_TEMPLATES');
+        return t;
       }
-      setCache(cacheKey, templates);
-      return res.json({ templates });
-    }
 
-    const manifestTemplates = await loadTemplateManifest(storage);
-    let templates = manifestTemplates || [];
+      const manifestTemplates = await loadTemplateManifest(storage);
+      if (manifestTemplates?.length) return manifestTemplates;
 
-    if (!templates.length) {
+      // 운영에서는 가능하면 여기로 떨어지지 않게(=manifest 강제)
       const keys = await listTemplateKeysFromS3(storage);
       const fetchConcurrency = Number(process.env.N8N_TEMPLATE_FETCH_CONCURRENCY) || 5;
-      templates = await mapWithConcurrency(keys, fetchConcurrency, async (key) => {
-        const template = await loadTemplateFromS3(key, storage);
-        if (!template.id) {
-          const filename = path.basename(key, '.json');
-          template.id = filename;
-        }
-        return { ...template, s3Key: key };
-      });
-    }
 
-    setCache(cacheKey, templates);
-    res.json({ templates });
+      return await mapWithConcurrency(keys, fetchConcurrency, async (key) => {
+        const template = await loadTemplateFromS3(key, storage);
+        const id = template.id || path.basename(key, '.json');
+        return { ...template, id, s3Key: key };
+      });
+    });
+
+    return res.json({ templates });
   } catch (error) {
+    if (error.message === 'NO_LOCAL_TEMPLATES') {
+      return res.status(404).json({ message: '로컬 템플릿을 찾을 수 없습니다. templates 폴더를 확인하세요.' });
+    }
     console.error('[template-list]', error);
-    res.status(500).json({ message: '템플릿을 불러오지 못했습니다. 서버 로그를 확인하세요.', error: error.message });
+    return res.status(500).json({ message: '템플릿을 불러오지 못했습니다.', error: error.message });
   }
 });
 
 app.get('/api/templates/:id', async (req, res) => {
   const storage = getTemplateStorageConfig();
   const templateId = req.params.id;
-  const cacheKey = `template:${templateId}`;
-  const cached = getCache(cacheKey);
-  if (cached) {
-    return res.json({ template: cached });
-  }
 
   try {
-    if (!storage) {
-      const template = await loadTemplateFromDisk(templateId);
-      if (!template) {
-        return res.status(404).json({ message: `템플릿 ${templateId}을(를) 찾을 수 없습니다.` });
+    const template = await cachedFetch(`template:${templateId}`, TEMPLATE_CACHE_TTL_MS, async () => {
+      if (!storage) {
+        const t = await loadTemplateFromDisk(templateId);
+        if (!t) throw new Error('NOT_FOUND');
+        return normalizeTemplatePayload(t);
       }
-      const normalized = normalizeTemplatePayload(template);
-      setCache(cacheKey, normalized);
-      return res.json({ template: normalized });
-    }
 
-    const cachedList = getCache('templates:list');
-    const hint = Array.isArray(cachedList) ? cachedList.find((item) => item.id === templateId) : null;
-    const s3Key = hint?.s3Key || `${storage.keyPrefix}${templateId}.json`;
+      const cachedList = getCache('templates:list');
+      const hint = Array.isArray(cachedList) ? cachedList.find((i) => i.id === templateId) : null;
+      const s3Key = hint?.s3Key || `${storage.keyPrefix}${templateId}.json`;
 
-    const template = await loadTemplateFromS3(s3Key, storage);
-    if (!template.id) template.id = templateId;
-    const normalized = { ...normalizeTemplatePayload(template), s3Key };
-    setCache(cacheKey, normalized);
-    return res.json({ template: normalized });
+      const t = await loadTemplateFromS3(s3Key, storage);
+      if (!t.id) t.id = templateId;
+      return { ...normalizeTemplatePayload(t), s3Key };
+    });
+
+    return res.json({ template });
   } catch (error) {
-    console.error('[template-detail]', error);
-    const isMissing = /NoSuchKey|Not Found/i.test(error?.message || '');
-    const status = isMissing ? 404 : 500;
-    res.status(status).json({ message: '템플릿 상세를 불러오지 못했습니다.', error: error.message });
+    const isNotFound = error.message === 'NOT_FOUND' || /NoSuchKey|Not Found/i.test(error?.message || '');
+    const status = isNotFound ? 404 : 500;
+    if (!isNotFound) console.error('[template-detail]', error);
+    return res.status(status).json({ message: '템플릿 상세를 불러오지 못했습니다.', error: error.message });
   }
 });
 

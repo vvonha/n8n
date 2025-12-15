@@ -122,7 +122,7 @@ function App() {
     }
 
     if (!apiBase) {
-      setStatus('n8n API 주소를 입력해주세요. 예: https://n8n.ldccai.com/api/v1');
+      setStatus('n8n API 주소를 입력해주세요. 예: https://n8n.ldccai.com');
       return;
     }
 
